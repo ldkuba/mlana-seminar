@@ -68,7 +68,7 @@ def compute_angles_areas_normals(vertices, faces):
 def compute_edge_list(faces):
     vertex_pairs = torch.stack([faces[:, 0:2], faces[:, 1:3], faces[:, [2, 0]]], dim=1).sort(dim=-1).values
 
-    edge_list = torch.empty(size=(0,2), dtype=torch.int)
+    edge_list = torch.empty(size=(0,2), dtype=torch.int64)
 
     for i in range(faces.size(0)-1):
         vp1 = (vertex_pairs[i+1:] == vertex_pairs[i][0]).all(dim=2).any(dim=1)

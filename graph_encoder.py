@@ -108,7 +108,7 @@ class GraphEncoder(torch.nn.Module):
         self.conv2 = GraphConvLayer(64, 128)
         self.conv3 = GraphConvLayer(128, 256)
         self.conv4 = GraphConvLayer(256, 256)
-        self.conv5 = GraphConvLayer(256, 572)
+        self.conv5 = GraphConvLayer(256, 576)
     
     def forward(self, data) -> torch.Tensor:
         x = self.conv1(GraphEncoderData(data.x, data.edge_list))

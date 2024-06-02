@@ -77,9 +77,7 @@ def compute_edge_list(faces):
         adjecency = torch.logical_or(torch.logical_or(vp1, vp2), vp3)
         neighbours = torch.arange(start=i+1, end=faces.size(0))[adjecency]
         edge_list = torch.cat((edge_list, torch.stack((torch.ones(neighbours.size(0), dtype=torch.int)*i, neighbours), dim=1)))
-        
-    # SAGEConv expects the edge list in the shape (2, num_edges)
-    edge_list = edge_list.transpose(0, 1)
+
     return edge_list
 
 class GraphEncoderData():
@@ -111,6 +109,8 @@ class GraphEncoder(torch.nn.Module):
         self.conv5 = GraphConvLayer(256, 576)
     
     def forward(self, data) -> torch.Tensor:
+        # SAGEConv expects the edge list in the shape (2, num_edges)
+        data.edge_list = data.edge_list.transpose(0, 1)
         x = self.conv1(GraphEncoderData(data.x, data.edge_list))
         x = self.conv2(GraphEncoderData(x, data.edge_list))
         x = self.conv3(GraphEncoderData(x, data.edge_list))

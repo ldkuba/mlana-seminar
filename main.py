@@ -14,6 +14,7 @@ import trimesh
 
 num_discrete_values = 128
 pad_value = -2
+device = 'cuda'
 
 class MeshDataset(Dataset):
     def __init__(self, meshes):
@@ -29,8 +30,8 @@ class MeshDataset(Dataset):
 def load_model(filename):
     # load the mesh
     trimesh_mesh = trimesh.load_mesh(filename, merge_tex=True, merge_norm=True)
-    vertices = torch.tensor(trimesh_mesh.vertices, dtype=torch.float32)
-    faces = torch.tensor(trimesh_mesh.faces, dtype=torch.int64)
+    vertices = torch.tensor(trimesh_mesh.vertices, dtype=torch.float32, device='cpu')
+    faces = torch.tensor(trimesh_mesh.faces, dtype=torch.int64, device='cpu')
 
     # normalize the mesh to [-1, 1]
     aabb = trimesh_mesh.bounds.astype(np.float32)
@@ -38,9 +39,9 @@ def load_model(filename):
     scale = max(aabb[1] - aabb[0])
     vertices = (vertices - center) / scale
 
-    with torch.device("cpu"):
+    with torch.device(device):
         # sort the mesh vertices and faces
-        vertices_sorted, faces_sorted = ge.sort_mesh(vertices.to('cpu'), faces.to('cpu'))
+        vertices_sorted, faces_sorted = ge.sort_mesh(vertices.to(device), faces.to(device))
         # compute edge list
         edge_list = ge.compute_edge_list(faces_sorted)
 
@@ -93,21 +94,32 @@ if __name__ == "__main__":
 
     meshes = ["lantern.obj", "octopussy.obj"]
 
-    dataset = MeshDataset(meshes)
-    data_loader = DataLoader(dataset, batch_size=1, shuffle=True, drop_last=True, generator=torch.Generator(device='cpu'), collate_fn=mesh_collate)
+    batch_size = 2
 
-    with torch.device("cpu"):
-        autoEnc = ae.AutoEncoder().to("cpu")
+    dataset = MeshDataset(meshes)
+    data_loader = DataLoader(dataset, batch_size=1, shuffle=True, drop_last=True, generator=torch.Generator(device=device), collate_fn=mesh_collate)
+
+    num_batches = int(len(dataset) / batch_size)
+
+    with torch.device(device):
+        autoEnc = ae.AutoEncoder().to(device)
         optimizer = torch.optim.Adam(autoEnc.parameters(), lr=lr)
 
-        for batch_id, data in enumerate(data_loader):
-            current_time = time.time()
-            loss = autoEnc(data, pad_value)
-            print("loss: {}, time: {}, batch: {}".format(loss, time.time() - current_time, batch_id))
+        for epoch in range(500):
+            # TODO: make model work properly with batch_size > 1. For now manual batches
+            # for batch_id, data in enumerate(data_loader):
+            for batch_id in range(num_batches):
+                current_time = time.time()
 
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
+                for i in range(batch_size):
+                    data = dataset[batch_id * batch_size + i]
+                    loss = autoEnc(data, pad_value)
+
+                    loss.backward()
+
+                print("loss: {}, time: {}, batch: {}, epoch: {}".format(loss, time.time() - current_time, batch_id, epoch))
+                optimizer.step()
+                optimizer.zero_grad()
 
         # reconstruct the mesh
         rec_model = load_model("lantern.obj")

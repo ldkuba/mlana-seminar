@@ -24,11 +24,11 @@ class PositionalEncoding(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Arguments:
-            x: Tensor, shape ``[batch_size, seq_len, num_faces, embedding_dim]``
+            x: Tensor, shape ``[batch_size, seq_len, embedding_dim]``
         """
-        num_faces = x.size(1)
+        num_faces = x.size(-3)
 
-        pos = self.pe[:x.size(1)].unsqueeze(1)
+        pos = self.pe[:x.size(-3)].unsqueeze(-2)
         pos = pos.expand(num_faces, 9, self.d_model)
         x = x + pos
 
@@ -73,7 +73,7 @@ class AutoEncoder(torch.nn.Module):
         self.area_embedding = nn.Embedding(self.num_discrete_values, dim_area_embed)
         self.normal_embedding = nn.Embedding(self.num_discrete_values, dim_normal_embed)
         self.init_dim = dim_vertex_embed * 9 + dim_angle_embed * 3 + dim_normal_embed * 3 + dim_area_embed
-        
+
         self.face_node_dim = 196
 
         self.linear_face_node = nn.Linear(self.init_dim, self.face_node_dim)
@@ -81,28 +81,37 @@ class AutoEncoder(torch.nn.Module):
         # Positional encoding for vertex coordinates
         self.positional_enc = PositionalEncoding(d_model=dim_vertex_embed)
 
-        self.encoder = ge.GraphEncoder(self.init_dim)
+        self.encoder = ge.GraphEncoder(self.face_node_dim)
         self.vector_quantizer = vq.ResidualVQ(dim=192, num_quantizers=2, codebook_size=16384, shared_codebook=True, stochastic_sample_codes = True, commitment_weight=1.0)
         self.decoder = dec.Decoder()
 
         gauss = scipy.signal.gaussian(5, 0.4)
         gauss = gauss / gauss.sum()
         self.smooth_kernel = torch.tensor(gauss).repeat(9).view(9,5).unsqueeze(1)
-    
+
     # Data:
-    # - vertices: Tensor of shape (num_vertices, 3)
-    # - faces: Tensor of shape (num_faces, 3)
-    # - edge_list: Tensor of shape (num_edges, 2)
-    # - angles: Tensor of shape (num_faces, 3)
-    # - face_areas: Tensor of shape (num_faces)
-    # - normals: Tensor of shape (num_faces, 3)
+    # - vertices: Tensor of shape (batch, num_vertices, 3)
+    # - faces: Tensor of shape (batch, num_faces, 3)
+    # - edge_list: Tensor of shape (batch, num_edges, 2)
+    # - angles: Tensor of shape (batch, num_faces, 3)
+    # - face_areas: Tensor of shape (batch, num_faces)
+    # - normals: Tensor of shape (batch, num_faces, 3)
     # === MASKS ===
-    # - face_mask: Tensor of shape (num_faces, 3)
-    # - edge_list_mask: Tensor of shape (num_edges, 2)
+    # - face_mask: Tensor of shape (batch, num_faces, 3)
+    # - edge_list_mask: Tensor of shape (batch, num_edges, 2)
     def forward(self, data, pad_value, return_recon=False):
         faces = data['faces']
         vertices = data['vertices']
         num_vertices = vertices.size(-2)
+
+        # TODO: Implement batching properly later
+        data = {
+            "face_vertices": data["face_vertices"].squeeze(0),
+            "angles": data["angles"].squeeze(0),
+            "face_areas": data["face_areas"].squeeze(0),
+            "normals": data["normals"].squeeze(0),
+            "edge_list": data["edge_list"].squeeze(0),
+        }
 
         # quantize face features
         vertex_discrete = discretize(data['face_vertices'], -1, 1, self.num_discrete_values)
@@ -138,7 +147,7 @@ class AutoEncoder(torch.nn.Module):
         # Run the decoder
         decoded_vertices = self.decoder(quantized_face_features)
         num_decoded_faces = decoded_vertices.size(0) 
-        
+
         # Split last dimension into coordinates per face
         decoded_vertices = decoded_vertices.view(num_decoded_faces, 9, -1)
 
@@ -156,7 +165,7 @@ class AutoEncoder(torch.nn.Module):
 
         if not return_recon:
             return total_loss
-        
+
         with torch.no_grad():
             # Reconstruct the mesh from the decoded vertices
             # Get discretized vertex idx
@@ -169,4 +178,3 @@ class AutoEncoder(torch.nn.Module):
             reconstructed_faces = torch.arange(0, num_decoded_faces * 3).view(num_decoded_faces, 3)
 
             return total_loss, reconstructed_vertices, reconstructed_faces
-

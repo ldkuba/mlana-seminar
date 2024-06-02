@@ -25,7 +25,7 @@ def sort_mesh(vertices, faces):
 
     # permute face indices to have lowest at the first index
     lowest_index_idx = torch.argmin(faces, dim=1)
-    perms = (lowest_index_idx[:,None] + torch.arange(3)) % 3
+    perms = (lowest_index_idx[:,None] + torch.arange(3).to(lowest_index_idx)) % 3
     faces = torch.gather(faces, 1, perms)
 
     # sort faces by lowest index of vertex

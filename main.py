@@ -6,6 +6,7 @@ import torch.utils
 import trimesh.viewer
 import auto_encoder as ae
 import graph_encoder as ge
+import mesh_transformer as mt
 from torch.utils.data import Dataset, DataLoader
 
 import time
@@ -89,12 +90,14 @@ def mesh_collate(data):
             'edeg_mask': edge_mask}
 
 if __name__ == "__main__":
+    torch.cuda.memory._record_memory_history(max_entries=1000000, stacks="python")
+    
     # parameters
-    lr = 1e-1
+    lr = 1e-2
 
-    meshes = ["lantern.obj", "octopussy.obj"]
+    meshes = ["lantern-decimated-500.obj"]
 
-    batch_size = 2
+    batch_size = 1
 
     dataset = MeshDataset(meshes)
     data_loader = DataLoader(dataset, batch_size=1, shuffle=True, drop_last=True, generator=torch.Generator(device=device), collate_fn=mesh_collate)
@@ -103,9 +106,9 @@ if __name__ == "__main__":
 
     with torch.device(device):
         autoEnc = ae.AutoEncoder().to(device)
-        optimizer = torch.optim.Adam(autoEnc.parameters(), lr=lr)
+        autoencoderOptimizer = torch.optim.Adam(autoEnc.parameters(), lr=lr)
 
-        for epoch in range(500):
+        for epoch in range(400):
             # TODO: make model work properly with batch_size > 1. For now manual batches
             # for batch_id, data in enumerate(data_loader):
             for batch_id in range(num_batches):
@@ -117,14 +120,54 @@ if __name__ == "__main__":
 
                     loss.backward()
 
+                autoencoderOptimizer.step()
+                autoencoderOptimizer.zero_grad()
                 print("loss: {}, time: {}, batch: {}, epoch: {}".format(loss, time.time() - current_time, batch_id, epoch))
-                optimizer.step()
-                optimizer.zero_grad()
 
-        # reconstruct the mesh
-        rec_model = load_model("lantern.obj")
-        loss, verts, faces = autoEnc(rec_model, pad_value, return_recon=True)
-        reconstructed_mesh = trimesh.Trimesh(verts.cpu().numpy(), faces.cpu().numpy())
-        reconstructed_mesh.show()
-        reconstructed_mesh.export("reconstructed.obj")
-    
+        # save the trained autoencoder
+        torch.save(autoEnc.state_dict(), "./saved_models/autoencoder.pth")
+
+        del autoencoderOptimizer
+        torch.cuda.empty_cache()
+
+        # # reconstruct the mesh
+        # rec_model = load_model("lantern.obj")
+        # loss, verts, faces = autoEnc(rec_model, pad_value, return_recon=True)
+        # reconstructed_mesh = trimesh.Trimesh(verts.cpu().numpy(), faces.cpu().numpy())
+        # reconstructed_mesh.show()
+        # reconstructed_mesh.export("reconstructed.obj")
+
+        meshTransformer = mt.MeshTransformer(autoEnc, token_dim=512).to(device)
+        transformerOptimizer = torch.optim.Adam(meshTransformer.parameters(), lr=1e-3)
+
+        meshTransformer.freezeAutoEncoder()
+
+        for epoch in range(100):
+            for batch_id in range(num_batches):
+                current_time = time.time()
+
+                for i in range(batch_size):
+                    data = dataset[batch_id * batch_size + i]
+                    loss = meshTransformer(data, pad_value)
+
+                    loss.backward()
+
+                transformerOptimizer.step()
+                transformerOptimizer.zero_grad()
+                print("loss: {}, time: {}, batch: {}, epoch: {}".format(loss, time.time() - current_time, batch_id, epoch))
+
+        # Save the trained mesh transformer
+        torch.save(meshTransformer.state_dict(), "./saved_models/meshtransformer-pretrained.pth")
+        
+        del transformerOptimizer
+        torch.cuda.empty_cache()
+
+        # Generate a new mesh
+        generated_codes = meshTransformer.generate(torch.empty((0), device=device).long())
+        gen_verts, gen_faces = autoEnc.decode_mesh(generated_codes)
+        gen_mesh = trimesh.Trimesh(gen_verts.cpu().numpy(), gen_faces.cpu().numpy())
+        gen_mesh.show()
+        gen_mesh.export("generated.obj")
+
+    torch.cuda.memory._dump_snapshot("full_pipeline.pickle")
+    torch.cuda.memory._record_memory_history(enabled=None)

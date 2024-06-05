@@ -75,6 +75,7 @@ class AutoEncoder(torch.nn.Module):
         self.init_dim = dim_vertex_embed * 9 + dim_angle_embed * 3 + dim_normal_embed * 3 + dim_area_embed
 
         self.face_node_dim = 196
+        self.codebook_size = 16384
 
         self.linear_face_node = nn.Linear(self.init_dim, self.face_node_dim)
 
@@ -82,12 +83,48 @@ class AutoEncoder(torch.nn.Module):
         self.positional_enc = PositionalEncoding(d_model=dim_vertex_embed)
 
         self.encoder = ge.GraphEncoder(self.face_node_dim)
-        self.vector_quantizer = vq.ResidualVQ(dim=192, num_quantizers=2, codebook_size=16384, shared_codebook=True, stochastic_sample_codes = True, commitment_weight=1.0)
+        self.vector_quantizer = vq.ResidualVQ(dim=192, num_quantizers=2, codebook_size=self.codebook_size, shared_codebook=True, stochastic_sample_codes = True, commitment_weight=1.0)
         self.decoder = dec.Decoder()
 
         gauss = scipy.signal.gaussian(5, 0.4)
         gauss = gauss / gauss.sum()
         self.smooth_kernel = torch.tensor(gauss).repeat(9).view(9,5).unsqueeze(1)
+
+    @torch.no_grad()
+    def decode_mesh(self, face_codes):
+        # Get quantized vectors from codebooks
+        face_codes = face_codes.view(-1, 2)
+        quantized = torch.cat((self.vector_quantizer.codebooks[0][face_codes[:, 0]], self.vector_quantizer.codebooks[1][face_codes[:, 1]]))
+        quantized = quantized.view(-1, 3*quantized.size(-1))
+
+        # Run the decoder
+        decoded_vertices = self.decoder(quantized)
+        num_decoded_faces = decoded_vertices.size(0)
+
+        # Split last dimension into coordinates per face
+        decoded_vertices = decoded_vertices.view(num_decoded_faces, 9, -1)
+
+        # Apply logmax
+        decoded_vertices = torch.log_softmax(decoded_vertices, dim=-1)
+
+        return self.decodec_vertices_to_mesh(decoded_vertices)
+    
+    @torch.no_grad()
+    def decodec_vertices_to_mesh(self, decoded_vertices):
+        num_decoded_faces = decoded_vertices.size(0)
+
+        # Reconstruct the mesh from the decoded vertices
+        # Get discretized vertex idx
+        reconstructed_vertices_idx = decoded_vertices.argmax(dim=-1).double()
+
+        # Get the actual coordinates and reshape to (num_faces, 3, 3)
+        reconstructed_vertices = ((reconstructed_vertices_idx / (self.num_discrete_values - 1)) * 2 - 1)
+        reconstructed_vertices = reconstructed_vertices.view(num_decoded_faces * 3, 3)
+
+        reconstructed_faces = torch.arange(0, num_decoded_faces * 3).view(num_decoded_faces, 3)
+
+        return reconstructed_vertices, reconstructed_faces
+
 
     # Data:
     # - vertices: Tensor of shape (batch, num_vertices, 3)
@@ -99,7 +136,7 @@ class AutoEncoder(torch.nn.Module):
     # === MASKS ===
     # - face_mask: Tensor of shape (batch, num_faces, 3)
     # - edge_list_mask: Tensor of shape (batch, num_edges, 2)
-    def forward(self, data, pad_value, return_recon=False):
+    def forward(self, data, pad_value, return_recon=False, return_only_codes=False):
         faces = data['faces']
         vertices = data['vertices']
         num_vertices = vertices.size(-2)
@@ -144,6 +181,10 @@ class AutoEncoder(torch.nn.Module):
         # Collect the quantized indices back to faces
         quantized_face_features, face_codes = collect_vertex_features_to_faces(faces, quantized_vertex_features, vertex_codes)
 
+        # terminate early if we just perfom the encoding + quantization step
+        if return_only_codes:
+            return face_codes
+
         # Run the decoder
         decoded_vertices = self.decoder(quantized_face_features)
         num_decoded_faces = decoded_vertices.size(0) 
@@ -167,14 +208,5 @@ class AutoEncoder(torch.nn.Module):
             return total_loss
 
         with torch.no_grad():
-            # Reconstruct the mesh from the decoded vertices
-            # Get discretized vertex idx
-            reconstructed_vertices_idx = decoded_vertices.argmax(dim=-1).double()
-
-            # Get the actual coordinates and reshape to (num_faces, 3, 3)
-            reconstructed_vertices = ((reconstructed_vertices_idx / (self.num_discrete_values - 1)) * 2 - 1)
-            reconstructed_vertices = reconstructed_vertices.view(num_decoded_faces * 3, 3)
-
-            reconstructed_faces = torch.arange(0, num_decoded_faces * 3).view(num_decoded_faces, 3)
-
+            reconstructed_vertices, reconstructed_faces = self.decodec_vertices_to_mesh(decoded_vertices)
             return total_loss, reconstructed_vertices, reconstructed_faces

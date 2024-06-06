@@ -45,7 +45,7 @@ class MeshTransformer(torch.nn.Module):
 
         self.decoder_only_transformer = Decoder(
             dim = self.token_dim,   # dimension of the model (token embeddings)
-            depth = 12,             # depth of the network (layers)
+            depth = 24,             # depth of the network (layers)
             heads = 16,             # number of heads in the multiheadattention models
             attn_dim_head = 64,     # dimension of the heads
         )
@@ -99,7 +99,7 @@ class MeshTransformer(torch.nn.Module):
         assert face_codes.size(0) <= self.context_length, "Input mesh is too large (max 500 faces)"
 
         # Save target face codes
-        target = torch.cat((torch.tensor([self.sos_id]), face_codes.clone(), torch.tensor([self.eos_id])))
+        target = torch.cat((torch.tensor([self.sos_id], device='cuda'), face_codes.clone(), torch.tensor([self.eos_id], device='cuda')))
 
         # Create token embeddings
         face_codes = self.token_embedding(face_codes)

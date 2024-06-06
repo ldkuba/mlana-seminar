@@ -88,7 +88,7 @@ class AutoEncoder(torch.nn.Module):
 
         gauss = scipy.signal.gaussian(5, 0.4)
         gauss = gauss / gauss.sum()
-        self.smooth_kernel = torch.tensor(gauss).repeat(9).view(9,5).unsqueeze(1)
+        self.smooth_kernel = torch.tensor(gauss, device='cuda').repeat(9).view(9,5).unsqueeze(1)
 
     @torch.no_grad()
     def decode_mesh(self, face_codes):

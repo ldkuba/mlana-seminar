@@ -94,10 +94,12 @@ class MeshGPTTrainer():
         self.autoEnc = ae.AutoEncoder().to(device)
         self.autoenc_lr = 1e-2
         self.autoenc_batch_size = 1
+        self.autoenc_epochs = 10
 
         self.meshTransformer = mt.MeshTransformer(self.autoEnc, token_dim=512).to(device)
         self.transformer_lr = 1e-3
         self.transformer_batch_size = 1
+        self.transformer_epochs = 5
 
         self.dataset = dataset
 
@@ -109,7 +111,7 @@ class MeshGPTTrainer():
             
             autoencoderOptimizer = torch.optim.Adam(self.autoEnc.parameters(), lr=self.autoenc_lr)
 
-            for epoch in range(5):
+            for epoch in range(self.autoenc_epochs):
                 # TODO: make model work properly with batch_size > 1. For now manual batches
                 # for batch_id, data in enumerate(data_loader):
                 for batch_id in range(num_batches):
@@ -133,6 +135,9 @@ class MeshGPTTrainer():
             del autoencoderOptimizer
             torch.cuda.empty_cache()
 
+    def load_autoencoder(self, autoenc_dict_file):
+        self.autoEnc.load_state_dict(torch.load(autoenc_dict_file))
+
     def reconstruct_mesh(self, in_mesh_file):
         # reconstruct the mesh
         rec_model = MeshDataset.load_model(in_mesh_file)
@@ -147,7 +152,7 @@ class MeshGPTTrainer():
             transformerOptimizer = torch.optim.Adam(self.meshTransformer.parameters(), lr=1e-3)
             self.meshTransformer.freezeAutoEncoder()
 
-            for epoch in range(2):
+            for epoch in range(self.transformer_epochs):
                 for batch_id in range(num_batches):
                     current_time = time.time()
 
@@ -168,6 +173,9 @@ class MeshGPTTrainer():
             del data_loader
             del transformerOptimizer
             torch.cuda.empty_cache()
+
+    def load_mesh_transformer(self, transformer_dict_file):
+        self.meshTransformer.load_state_dict(torch.load(transformer_dict_file))
 
     def generate_mesh(self, prompt=None, max_length=0):
         if not prompt:

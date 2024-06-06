@@ -4,8 +4,7 @@ import torch.nn as nn
 import vector_quantize_pytorch as vq
 import graph_encoder as ge
 import decoder as dec
-from torchvision.transforms import GaussianBlur
-import scipy
+import numpy as np
 
 # taken from https://pytorch.org/tutorials/beginner/transformer_tutorial.html
 class PositionalEncoding(nn.Module):
@@ -59,6 +58,11 @@ def discretize(x, min_val, max_val, num_values):
     x = torch.round(x).long()
     return x
 
+def gaussian_filter1d(size,sigma):
+    filter_range = np.linspace(-int(size/2),int(size/2),size)
+    gaussian_filter = [1 / (sigma * np.sqrt(2*np.pi)) * np.exp(-x**2/(2*sigma**2)) for x in filter_range]
+    return gaussian_filter
+
 class AutoEncoder(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -86,9 +90,9 @@ class AutoEncoder(torch.nn.Module):
         self.vector_quantizer = vq.ResidualVQ(dim=192, num_quantizers=2, codebook_size=self.codebook_size, shared_codebook=True, stochastic_sample_codes = True, commitment_weight=1.0)
         self.decoder = dec.Decoder()
 
-        gauss = scipy.signal.gaussian(5, 0.4)
+        gauss = torch.tensor(gaussian_filter1d(5, 0.4), device='cuda')
         gauss = gauss / gauss.sum()
-        self.smooth_kernel = torch.tensor(gauss, device='cuda').repeat(9).view(9,5).unsqueeze(1)
+        self.smooth_kernel = gauss.repeat(9).view(9,5).unsqueeze(1)
 
     @torch.no_grad()
     def decode_mesh(self, face_codes):

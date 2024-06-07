@@ -13,7 +13,7 @@ import time
 
 import trimesh
 
-pad_value = -2
+pad_value = -1
 device = 'cuda'
 
 class MeshDataset(Dataset):
@@ -93,12 +93,12 @@ class MeshGPTTrainer():
     def __init__(self, dataset):
         self.autoEnc = ae.AutoEncoder().to(device)
         self.autoenc_lr = 1e-2
-        self.autoenc_batch_size = 1
+        self.autoenc_batch_size = 2
         self.autoenc_epochs = 10
 
         self.meshTransformer = mt.MeshTransformer(self.autoEnc, token_dim=512).to(device)
         self.transformer_lr = 1e-3
-        self.transformer_batch_size = 1
+        self.transformer_batch_size = 2
         self.transformer_epochs = 5
 
         self.dataset = dataset
@@ -153,14 +153,11 @@ class MeshGPTTrainer():
             self.meshTransformer.freezeAutoEncoder()
 
             for epoch in range(self.transformer_epochs):
-                for batch_id in range(num_batches):
+                for batch_id, data in enumerate(data_loader):
                     current_time = time.time()
+                    loss = self.meshTransformer(data, pad_value)
 
-                    for i in range(self.transformer_batch_size):
-                        data = self.dataset[batch_id * self.transformer_batch_size + i]
-                        loss = self.meshTransformer(data, pad_value)
-
-                        loss.backward()
+                    loss.backward()
 
                     transformerOptimizer.step()
                     transformerOptimizer.zero_grad()

@@ -14,17 +14,17 @@ class TokensPositionalEncoding(torch.nn.Module):
 
         position = torch.arange(max_len).unsqueeze(1)
         div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
-        pe = torch.zeros(1, max_len, d_model)
-        pe[0, :, 0::2] = torch.sin(position * div_term)
-        pe[0, :, 1::2] = torch.cos(position * div_term)
+        pe = torch.zeros(max_len, d_model)
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
         self.register_buffer('pe', pe)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Arguments:
-            x: Tensor, shape ``[batch_size, seq_len, embedding_dim]``
+            x: Tensor, shape ``[seq_len, embedding_dim]``
         """
-        pos = self.pe[:, :x.size(1)]
+        pos = self.pe[:x.size(0)]
         x = x + pos
 
         return self.dropout(x)
@@ -72,10 +72,7 @@ class MeshTransformer(torch.nn.Module):
 
         for i in tqdm(range(remaining_length)):
             # Predict next token
-            codes = codes.unsqueeze(0)
-            decoder_out, cache = self.process_codes(codes, cache=cache, handle_padding=False, append_eos=False, return_logits=True, return_cache=True)
-            codes = codes.squeeze(0)
-            decoder_out = decoder_out.squeeze(0)
+            decoder_out, cache = self.process_codes(codes, cache=cache, append_eos=False, return_logits=True, return_cache=True)
 
             # Sample a random token from the distribution
             logits = decoder_out[-1, :]
@@ -98,17 +95,11 @@ class MeshTransformer(torch.nn.Module):
 
         return codes
 
-    def process_codes(self, face_codes, pad_value=-1, handle_padding=True, cache=None, append_eos=True, return_logits=False, return_cache=False):
-        batch_size = face_codes.size(0)
-        assert face_codes.size(1) <= self.context_length, "Input mesh is too large (max 500 faces)"
-
-        if handle_padding:
-            # Replace padding with 0's
-            face_codes_mask = face_codes != pad_value
-            face_codes = torch.masked_fill(face_codes, ~face_codes_mask, 0)
+    def process_codes(self, face_codes, cache=None, append_eos=True, return_logits=False, return_cache=False):
+        assert face_codes.size(0) <= self.context_length, "Input mesh is too large (max 500 faces)"
 
         # Save target face codes
-        target = torch.cat((torch.tensor([self.sos_id], device='cuda').repeat(batch_size).view(batch_size, 1), face_codes.clone(), torch.tensor([self.eos_id], device='cuda').repeat(batch_size).view(batch_size, 1)), dim=1)
+        target = torch.cat((torch.tensor([self.sos_id], device='cuda'), face_codes.clone(), torch.tensor([self.eos_id], device='cuda')))
 
         # Create token embeddings
         face_codes = self.token_embedding(face_codes)
@@ -117,22 +108,22 @@ class MeshTransformer(torch.nn.Module):
         face_codes = self.positional_encoding(face_codes)
 
         # Add sos and eos tokens
-        face_codes = torch.cat((self.start_token.unsqueeze(0).repeat(batch_size, 1).view(batch_size, 1, self.token_dim), face_codes), dim=1)
+        face_codes = torch.cat((self.start_token.unsqueeze(0), face_codes))
         if append_eos:
-            face_codes = torch.cat((face_codes, self.end_token.unsqueeze(0).repeat(batch_size, 1).view(batch_size, 1, self.token_dim)), dim=1)
+            face_codes = torch.cat((face_codes, self.end_token.unsqueeze(0)))
+
+        # Run the transformer decoder
+        face_codes = face_codes.unsqueeze(0)
 
         if return_cache:
             face_decoded, cache = self.decoder_only_transformer(face_codes, cache=cache, return_hiddens=True)
         else:
             face_decoded = self.decoder_only_transformer(face_codes)
+        
+        face_decoded = face_decoded.squeeze(0)
 
         # Remove sos token and get logits
         face_logits = self.logits(face_decoded)
-
-        if handle_padding:
-            # Reapply padding
-            slice_end = face_logits.size(1) - 1 if append_eos else face_logits.size(1)
-            face_logits[:, 1:slice_end][~face_codes_mask] = pad_value
         
         if return_logits:
             if return_cache:
@@ -140,7 +131,7 @@ class MeshTransformer(torch.nn.Module):
             else:
                 return face_logits
 
-        loss = torch.nn.functional.cross_entropy(torch.movedim(face_logits, 1, 2), target, ignore_index=pad_value)
+        loss = torch.nn.functional.cross_entropy(face_logits, target)
 
         if return_cache:
             return loss, cache
@@ -151,24 +142,8 @@ class MeshTransformer(torch.nn.Module):
     def forward(self, data, pad_value):
         # Encode mesh data
         with torch.no_grad():
-            batched_codes = []
-            batch_size = data['faces'].size(0)
+            face_codes = self.autoencoder(data, pad_value, return_only_codes=True)
+            # Flatten face tokens
+            face_codes = face_codes.flatten(0)
 
-            for i in range(batch_size):
-                mesh_data = {
-                    'vertices': data['vertices'][i],
-                    'faces': data['faces'][i],
-                    'face_vertices': data['face_vertices'][i],
-                    'edge_list': data['edge_list'][i],
-                    'angles': data['angles'][i],
-                    'face_areas': data['face_areas'][i],
-                    'normals': data['normals'][i]
-                }
-
-                face_codes = self.autoencoder(mesh_data, pad_value, return_only_codes=True)
-                # Flatten face tokens
-                face_codes = face_codes.flatten(0)
-                face_codes = torch.nn.functional.pad(face_codes, (0, self.context_length - face_codes.size(0)), value=pad_value)
-                batched_codes.append(face_codes)
-
-        return self.process_codes(torch.stack(batched_codes), pad_value=pad_value, append_eos=True)
+        return self.process_codes(face_codes, append_eos=True)

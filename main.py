@@ -13,7 +13,7 @@ if __name__ == "__main__":
                 if file.endswith(".obj"):
                     meshes.append(root + "/" + file)
 
-    dataset = mg.MeshDataset(meshes)
+    dataset = mg.MeshDataset(meshes[:35])
 
     # Create MeshGPTTrainer
     meshgpt = mg.MeshGPTTrainer(dataset)
@@ -24,11 +24,11 @@ if __name__ == "__main__":
     # # Train mesh transformer
     # meshgpt.train_mesh_transformer("./saved_models/mesh_transformer_{}.pth".format(datetime.datetime.now().strftime("%Y-%m-%d_%I-%M-%S_%p")))
 
-    # Load autoencoder
-    meshgpt.load_autoencoder("./saved_models/autoencoder.pth")
+    # # Load autoencoder
+    # meshgpt.load_autoencoder("./saved_models/autoencoder.pth")
 
-    # Load mesh transformer
-    meshgpt.load_mesh_transformer("./saved_models/mesh_transformer.pth")
+    # # Load mesh transformer
+    # meshgpt.load_mesh_transformer("./saved_models/mesh_transformer.pth")
 
     # # Generate mesh
     # generated_mesh = meshgpt.generate_mesh()

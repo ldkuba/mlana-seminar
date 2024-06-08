@@ -8,6 +8,7 @@ import auto_encoder as ae
 import graph_encoder as ge
 import mesh_transformer as mt
 from torch.utils.data import Dataset, DataLoader
+from tqdm import tqdm
 
 import time
 
@@ -18,7 +19,10 @@ device = 'cuda'
 
 class MeshDataset(Dataset):
     def __init__(self, meshes):
-        self.meshes = [MeshDataset.load_model(x) for x in meshes]
+        self.meshes = []
+        print("Loading dataset")
+        for x in tqdm(meshes):
+            self.meshes.append(MeshDataset.load_model(x))
 
     def __len__(self):
         return len(self.meshes)
@@ -29,7 +33,7 @@ class MeshDataset(Dataset):
     # Loads the model and returns the sorted vertices, faces and edge list
     def load_model(filename):
         # load the mesh
-        trimesh_mesh = trimesh.load_mesh(filename, merge_tex=True, merge_norm=True)
+        trimesh_mesh = trimesh.load(filename, merge_tex=True, merge_norm=True, force='mesh')
         vertices = torch.tensor(trimesh_mesh.vertices, dtype=torch.float32, device='cpu')
         faces = torch.tensor(trimesh_mesh.faces, dtype=torch.int64, device='cpu')
 
@@ -92,46 +96,51 @@ def mesh_collate(data):
 class MeshGPTTrainer():
     def __init__(self, dataset):
         self.autoEnc = ae.AutoEncoder().to(device)
-        self.autoenc_lr = 1e-2
-        self.autoenc_batch_size = 1
-        self.autoenc_epochs = 10
+        self.autoenc_lr = 1e-4
+        self.autoenc_batch_size = 64
 
         self.meshTransformer = mt.MeshTransformer(self.autoEnc, token_dim=512).to(device)
-        self.transformer_lr = 1e-3
-        self.transformer_batch_size = 1
-        self.transformer_epochs = 5
+        self.transformer_lr = 1e-4
+        self.transformer_batch_size = 64
 
         self.dataset = dataset
 
-    def train_autoencoder(self, autoenc_dict_file=None):
+    def train_autoencoder(self, autoenc_dict_file=None, save_every=200, epochs=10):
         num_batches = int(len(self.dataset) / self.autoenc_batch_size)
-        data_loader = DataLoader(self.dataset, batch_size=self.autoenc_batch_size, shuffle=True, drop_last=True, generator=torch.Generator(device=device), collate_fn=mesh_collate)
+        # data_loader = DataLoader(self.dataset, batch_size=self.autoenc_batch_size, shuffle=True, drop_last=True, generator=torch.Generator(device=device), collate_fn=mesh_collate)
 
         with torch.device(device):
             
             autoencoderOptimizer = torch.optim.Adam(self.autoEnc.parameters(), lr=self.autoenc_lr)
 
-            for epoch in range(self.autoenc_epochs):
+            for epoch in range(epochs):
                 # TODO: make model work properly with batch_size > 1. For now manual batches
                 # for batch_id, data in enumerate(data_loader):
                 for batch_id in range(num_batches):
                     current_time = time.time()
 
+                    total_loss = 0
                     for i in range(self.autoenc_batch_size):
                         data = self.dataset[batch_id * self.autoenc_batch_size + i]
-                        loss = self.autoEnc(data, pad_value)
+                        total_loss += self.autoEnc(data, pad_value)
 
-                        loss.backward()
+                    total_loss /= self.autoenc_batch_size
+                    total_loss.backward()
 
                     autoencoderOptimizer.step()
                     autoencoderOptimizer.zero_grad()
-                    print("loss: {}, time: {}, batch: {}, epoch: {}".format(loss, time.time() - current_time, batch_id, epoch))
+                    print("loss: {}, time: {}, batch: {}, epoch: {}".format(total_loss, time.time() - current_time, batch_id, epoch))
+
+                    if batch_id % save_every == 0:
+                        torch.save(self.autoEnc.state_dict(), autoenc_dict_file + "_{}".format(batch_id) + ".pth")
+                        torch.save(autoencoderOptimizer.state_dict(), autoenc_dict_file + "_optimizer_{}".format(batch_id) + ".pth")
 
             # save the trained autoencoder
             if autoenc_dict_file:
-                torch.save(self.autoEnc.state_dict(), autoenc_dict_file)
+                torch.save(self.autoEnc.state_dict(), autoenc_dict_file + "_end.pth")
+                torch.save(autoencoderOptimizer.state_dict(), autoenc_dict_file + "_optimizer_end.pth")
 
-            del data_loader
+            # del data_loader
             del autoencoderOptimizer
             torch.cuda.empty_cache()
 
@@ -144,16 +153,16 @@ class MeshGPTTrainer():
         loss, verts, faces = self.autoEnc(rec_model, pad_value, return_recon=True)
         return trimesh.Trimesh(verts.cpu().numpy(), faces.cpu().numpy())
 
-    def train_mesh_transformer(self, transformer_dict_file):
+    def train_mesh_transformer(self, transformer_dict_file, save_every=8, epochs=1):
         num_batches = int(len(self.dataset) / self.transformer_batch_size)
         data_loader = DataLoader(self.dataset, batch_size=self.transformer_batch_size, shuffle=True, drop_last=True, generator=torch.Generator(device=device), collate_fn=mesh_collate)
 
         with torch.device(device):
-            transformerOptimizer = torch.optim.Adam(self.meshTransformer.parameters(), lr=1e-3)
+            transformerOptimizer = torch.optim.Adam(self.meshTransformer.parameters(), lr=self.transformer_lr)
             self.meshTransformer.freezeAutoEncoder()
 
-            for epoch in range(self.transformer_epochs):
-                for batch_id in range(num_batches):
+            for epoch in range(epochs):
+                for batch_id, data in enumerate(data_loader):
                     current_time = time.time()
 
                     for i in range(self.transformer_batch_size):
@@ -166,9 +175,14 @@ class MeshGPTTrainer():
                     transformerOptimizer.zero_grad()
                     print("loss: {}, time: {}, batch: {}, epoch: {}".format(loss, time.time() - current_time, batch_id, epoch))
 
+                    if batch_id % save_every == 0:
+                        torch.save(self.autoEnc.state_dict(), transformer_dict_file + "_{}".format(batch_id) + ".pth")
+                        torch.save(transformerOptimizer.state_dict(), transformer_dict_file + "_optimizer_{}".format(batch_id) + ".pth")
+
             # Save the trained mesh transformer
             if transformer_dict_file:
-                torch.save(self.meshTransformer.state_dict(), transformer_dict_file)
+                torch.save(self.meshTransformer.state_dict(), transformer_dict_file + "_end.pth")
+                torch.save(transformerOptimizer.state_dict(), transformer_dict_file + "_optimizer_end.pth")
 
             del data_loader
             del transformerOptimizer

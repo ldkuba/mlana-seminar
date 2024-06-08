@@ -34,8 +34,8 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 def distribute_face_features_to_vertices(face_features, faces, vertex_count):
-    vertex_features = torch.zeros(size=(vertex_count, 192))
-    vertex_mean_count = torch.zeros(size=(vertex_count, 1))
+    vertex_features = torch.zeros(size=(vertex_count, 192), device=face_features.device)
+    vertex_mean_count = torch.zeros(size=(vertex_count, 1), device=face_features.device)
     for i in range(faces.size(0)):
         vertex_features[faces[i][0]] = vertex_features[faces[i][0]] + face_features[i][:192]
         vertex_mean_count[faces[i][0]] += 1

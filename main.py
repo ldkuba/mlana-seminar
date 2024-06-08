@@ -13,7 +13,7 @@ if __name__ == "__main__":
                 if file.endswith(".obj"):
                     meshes.append(root + "/" + file)
 
-    dataset = mg.MeshDataset(meshes[:35])
+    dataset = mg.MeshDataset(meshes)
 
     # Create MeshGPTTrainer
     meshgpt = mg.MeshGPTTrainer(dataset)

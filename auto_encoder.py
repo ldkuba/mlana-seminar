@@ -98,6 +98,7 @@ class AutoEncoder(torch.nn.Module):
     def decode_mesh(self, face_codes):
         # Get quantized vectors from codebooks
         face_codes = face_codes.view(-1, 2)
+        face_codes_cpu = face_codes.cpu()
         quantized = torch.cat((self.vector_quantizer.codebooks[0][face_codes[:, 0]], self.vector_quantizer.codebooks[1][face_codes[:, 1]]))
         quantized = quantized.view(-1, 3*quantized.size(-1))
 

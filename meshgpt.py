@@ -97,11 +97,11 @@ class MeshGPTTrainer():
     def __init__(self, dataset):
         self.autoEnc = ae.AutoEncoder().to(device)
         self.autoenc_lr = 1e-3
-        self.autoenc_batch_size = 64
+        self.autoenc_batch_size = 1
 
         self.meshTransformer = mt.MeshTransformer(self.autoEnc, token_dim=512).to(device)
-        self.transformer_lr = 1e-4
-        self.transformer_batch_size = 64
+        self.transformer_lr = 1e-3
+        self.transformer_batch_size = 1
 
         self.dataset = dataset
 
@@ -138,8 +138,6 @@ class MeshGPTTrainer():
                         elif batch_id % save_every == 0:
                             torch.save(self.autoEnc.state_dict(), autoenc_dict_file + "_epoch{}".format(epoch) + "_batch{}".format(batch_id) + ".pth")
                             torch.save(autoencoderOptimizer.state_dict(), autoenc_dict_file + "_epoch{}".format(epoch) + "_optimizer_batch{}".format(batch_id) + ".pth")
-                    
-                        
 
             # save the trained autoencoder
             if autoenc_dict_file:
@@ -159,7 +157,7 @@ class MeshGPTTrainer():
         loss, verts, faces = self.autoEnc(rec_model, pad_value, return_recon=True)
         return trimesh.Trimesh(verts.cpu().numpy(), faces.cpu().numpy())
 
-    def train_mesh_transformer(self, transformer_dict_file, save_every=8, epochs=1):
+    def train_mesh_transformer(self, transformer_dict_file=None, save_every=8, epochs=1, minimize_slivers=True):
         num_batches = int(len(self.dataset) / self.transformer_batch_size)
         data_loader = DataLoader(self.dataset, batch_size=self.transformer_batch_size, shuffle=True, drop_last=True, generator=torch.Generator(device=device), collate_fn=mesh_collate)
 
@@ -171,15 +169,17 @@ class MeshGPTTrainer():
                 for batch_id, data in enumerate(data_loader):
                     current_time = time.time()
 
+                    total_loss = 0
                     for i in range(self.transformer_batch_size):
                         data = self.dataset[batch_id * self.transformer_batch_size + i]
-                        loss = self.meshTransformer(data, pad_value)
+                        total_loss += self.meshTransformer(data, pad_value, minimize_slivers=minimize_slivers)
 
-                        loss.backward()
-
+                    total_loss /= self.transformer_batch_size
+                    total_loss.backward()
+                    
                     transformerOptimizer.step()
                     transformerOptimizer.zero_grad()
-                    print("loss: {}, time: {}, batch: {}, epoch: {}".format(loss, time.time() - current_time, batch_id, epoch))
+                    print("loss: {}, time: {}, batch: {}, epoch: {}".format(total_loss, time.time() - current_time, batch_id, epoch))
 
                     if save_every > 0 and transformer_dict_file:
                         if batch_id == num_batches - 1:

@@ -96,7 +96,7 @@ def mesh_collate(data):
 class MeshGPTTrainer():
     def __init__(self, dataset):
         self.autoEnc = ae.AutoEncoder().to(device)
-        self.autoenc_lr = 1e-4
+        self.autoenc_lr = 1e-3
         self.autoenc_batch_size = 64
 
         self.meshTransformer = mt.MeshTransformer(self.autoEnc, token_dim=512).to(device)
@@ -105,7 +105,7 @@ class MeshGPTTrainer():
 
         self.dataset = dataset
 
-    def train_autoencoder(self, autoenc_dict_file=None, save_every=8, epochs=10):
+    def train_autoencoder(self, autoenc_dict_file=None, save_every=-1, epochs=10):
         num_batches = int(len(self.dataset) / self.autoenc_batch_size)
         # data_loader = DataLoader(self.dataset, batch_size=self.autoenc_batch_size, shuffle=True, drop_last=True, generator=torch.Generator(device=device), collate_fn=mesh_collate)
 
@@ -131,12 +131,13 @@ class MeshGPTTrainer():
                     autoencoderOptimizer.zero_grad()
                     print("loss: {}, time: {}, batch: {}, epoch: {}".format(total_loss, time.time() - current_time, batch_id, epoch))
 
-                    if batch_id == num_batches - 1:
-                        torch.save(self.autoEnc.state_dict(), autoenc_dict_file + "_epoch{}".format(epoch) + "_last.pth")
-                        torch.save(autoencoderOptimizer.state_dict(), autoenc_dict_file + "_epoch{}".format(epoch) + "_optimizer_last.pth")
-                    elif batch_id % save_every == 0:
-                        torch.save(self.autoEnc.state_dict(), autoenc_dict_file + "_epoch{}".format(epoch) + "_batch{}".format(batch_id) + ".pth")
-                        torch.save(autoencoderOptimizer.state_dict(), autoenc_dict_file + "_epoch{}".format(epoch) + "_optimizer_batch{}".format(batch_id) + ".pth")
+                    if save_every > 0 and autoenc_dict_file:
+                        if batch_id == num_batches - 1:
+                            torch.save(self.autoEnc.state_dict(), autoenc_dict_file + "_epoch{}".format(epoch) + "_last.pth")
+                            torch.save(autoencoderOptimizer.state_dict(), autoenc_dict_file + "_epoch{}".format(epoch) + "_optimizer_last.pth")
+                        elif batch_id % save_every == 0:
+                            torch.save(self.autoEnc.state_dict(), autoenc_dict_file + "_epoch{}".format(epoch) + "_batch{}".format(batch_id) + ".pth")
+                            torch.save(autoencoderOptimizer.state_dict(), autoenc_dict_file + "_epoch{}".format(epoch) + "_optimizer_batch{}".format(batch_id) + ".pth")
                     
                         
 
@@ -180,12 +181,13 @@ class MeshGPTTrainer():
                     transformerOptimizer.zero_grad()
                     print("loss: {}, time: {}, batch: {}, epoch: {}".format(loss, time.time() - current_time, batch_id, epoch))
 
-                    if batch_id == num_batches - 1:
-                        torch.save(self.autoEnc.state_dict(), transformer_dict_file + "_epoch{}".format(epoch) + "_last.pth")
-                        torch.save(transformerOptimizer.state_dict(), transformer_dict_file + "_epoch{}".format(epoch) + "_optimizer_last.pth")
-                    elif batch_id % save_every == 0:
-                        torch.save(self.autoEnc.state_dict(), transformer_dict_file + "_epoch{}".format(epoch) + "_batch{}".format(batch_id) + ".pth")
-                        torch.save(transformerOptimizer.state_dict(), transformer_dict_file + "_epoch{}".format(epoch) + "_optimizer_batch{}".format(batch_id) + ".pth")
+                    if save_every > 0 and transformer_dict_file:
+                        if batch_id == num_batches - 1:
+                            torch.save(self.autoEnc.state_dict(), transformer_dict_file + "_epoch{}".format(epoch) + "_last.pth")
+                            torch.save(transformerOptimizer.state_dict(), transformer_dict_file + "_epoch{}".format(epoch) + "_optimizer_last.pth")
+                        elif batch_id % save_every == 0:
+                            torch.save(self.autoEnc.state_dict(), transformer_dict_file + "_epoch{}".format(epoch) + "_batch{}".format(batch_id) + ".pth")
+                            torch.save(transformerOptimizer.state_dict(), transformer_dict_file + "_epoch{}".format(epoch) + "_optimizer_batch{}".format(batch_id) + ".pth")
 
             # Save the trained mesh transformer
             if transformer_dict_file:

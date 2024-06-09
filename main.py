@@ -18,14 +18,14 @@ if __name__ == "__main__":
     # Create MeshGPTTrainer
     meshgpt = mg.MeshGPTTrainer(dataset)
 
-    # Train autoencoder
-    meshgpt.train_autoencoder("./saved_models/autoencoder_test", save_every=200, epochs=10)
+    # # Train autoencoder
+    meshgpt.train_autoencoder("./saved_models/autoencoder_v2", save_every=200, epochs=10)
 
     # # Train mesh transformer
     # meshgpt.train_mesh_transformer("./saved_models/mesh_transformer_{}.pth".format(datetime.datetime.now().strftime("%Y-%m-%d_%I-%M-%S_%p")))
 
-    # # Load autoencoder
-    # meshgpt.load_autoencoder("./saved_models/autoencoder.pth")
+    # Load autoencoder
+    # meshgpt.load_autoencoder("./saved_models/autoencoder_test_end.pth")
 
     # # Load mesh transformer
     # meshgpt.load_mesh_transformer("./saved_models/mesh_transformer.pth")

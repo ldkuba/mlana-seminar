@@ -5,6 +5,10 @@ import os
 
 if __name__ == "__main__":
     
+    t = torch.tensor([[0.1, 0.1, 0.1], [0.2, 0.2, 0.2]])
+    o = torch.tensor([0.1, 0.2, 0.3])
+    res = torch.matmul(t, o)
+
     # Create dataset
     meshes = []
     for root, dirs, files in os.walk("../ShapeNetCore/filtered_meshes"):
@@ -19,10 +23,10 @@ if __name__ == "__main__":
     meshgpt = mg.MeshGPTTrainer(dataset)
 
     # Train autoencoder
-    meshgpt.train_autoencoder(epochs=10)
+    meshgpt.train_autoencoder(epochs=2)
 
     # # Train mesh transformer
-    meshgpt.train_mesh_transformer(epochs=1, minimize_slivers=True)
+    meshgpt.train_mesh_transformer(epochs=1, minimize_slivers=False)
 
     # Load autoencoder
     # meshgpt.load_autoencoder("./saved_models/autoencoder_test_end.pth")

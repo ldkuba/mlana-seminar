@@ -29,10 +29,11 @@ class TokensPositionalEncoding(torch.nn.Module):
 
         return self.dropout(x)
     
-def calculate_sliver_loss(vertices):
+def calculate_sliver_loss(face_vertices):
     # Compute the angle between the edges
-    edges = vertices[:, (2, 0, 1)] - vertices
+    edges = face_vertices[:, (2, 0, 1)] - face_vertices
     edges = torch.nn.functional.normalize(edges, p=2, dim=-1)
+    normals = torch.nn.functional.normalize(torch.cross(edges[:, 0], edges[:, 1]), p=2, dim=-1)
     cos_angle_alpha = torch.sum(edges[:, 0] * -edges[:, 1], dim=-1)
     cos_angle_beta = torch.sum(edges[:, 1] * -edges[:, 2], dim=-1)
     cos_angle_gamma = torch.sum(edges[:, 2] * -edges[:, 0], dim=-1)
@@ -42,9 +43,32 @@ def calculate_sliver_loss(vertices):
     cos_angle = torch.pow(cos_angle, 4)
     abs_cos_angle = torch.abs(cos_angle)
 
+    # Calculate triangle neighbourhood
+    neighbourhood = torch.zeros(face_vertices.size(0), face_vertices.size(0), 3)
+    num_triangles = face_vertices.size(0)
+    flattened_face_verts = face_vertices.flatten(0, 1)
+    vertices, faces = torch.unique(flattened_face_verts, sorted=False, return_inverse=True, dim=0)
+    faces = faces.view(-1, 3)
+    vertex_pairs = torch.stack([faces[:, 0:2], faces[:, 1:3], faces[:, [2, 0]]], dim=1).sort(dim=-1).values
+
+    inv_curvature = torch.zeros(num_triangles)
+
+    for i in range(faces.size(0)-1):
+        vp1 = (vertex_pairs[i+1:] == vertex_pairs[i][0]).all(dim=2).any(dim=1)
+        vp2 = (vertex_pairs[i+1:] == vertex_pairs[i][1]).all(dim=2).any(dim=1)
+        vp3 = (vertex_pairs[i+1:] == vertex_pairs[i][2]).all(dim=2).any(dim=1)
+        adjecency = torch.logical_or(torch.logical_or(vp1, vp2), vp3)
+        neighbours = torch.arange(start=i+1, end=faces.size(0))[adjecency]
+        # Curvature in range [0, 1]
+        dot_products = torch.matmul(normals[neighbours], normals[i])
+        if dot_products.size(0) > 0:
+            inv_curvature[i] = torch.sum((dot_products + 1.0) / 2.0)
+        else: # If no neighbours, set influence to 0
+            inv_curvature[i] = 0.0
+
     # abs cos is in range [0, 1]
     sliver_loss_scale = 10.0
-    return torch.sum(abs_cos_angle) * sliver_loss_scale
+    return torch.sum(abs_cos_angle * inv_curvature) * sliver_loss_scale
 
 class MeshTransformer(torch.nn.Module):
     def __init__(self, autoencoder, token_dim=768, minimize_slivers=False):

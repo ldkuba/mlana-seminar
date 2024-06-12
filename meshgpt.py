@@ -65,13 +65,13 @@ class MeshDataset(Dataset):
             face_vertices = vertices_sorted[faces_sorted, :].flatten(1)
 
             return {
-                'vertices': vertices_sorted,
-                'faces': faces_sorted,
-                'face_vertices': face_vertices,
-                'edge_list': edge_list,
-                'angles': angles,
-                'face_areas': face_areas,
-                'normals': normals
+                'vertices': vertices_sorted.to('cpu'),
+                'faces': faces_sorted.to('cpu'),
+                'face_vertices': face_vertices.to('cpu'),
+                'edge_list': edge_list.to('cpu'),
+                'angles': angles.to('cpu'),
+                'face_areas': face_areas.to('cpu'),
+                'normals': normals.to('cpu')
             }
 
     
@@ -106,7 +106,7 @@ class MeshGPTTrainer():
     def __init__(self, dataset):
         self.autoEnc = ae.AutoEncoder().to(device)
         self.autoenc_lr = 1e-3
-        self.autoenc_batch_size = 1
+        self.autoenc_batch_size = 32
 
         self.meshTransformer = mt.MeshTransformer(self.autoEnc, token_dim=512).to(device)
         self.transformer_lr = 1e-3
@@ -114,13 +114,15 @@ class MeshGPTTrainer():
 
         self.dataset = dataset
 
-    def train_autoencoder(self, autoenc_dict_file=None, save_every=-1, epochs=10):
+    def train_autoencoder(self, autoenc_dict_file=None, optimizer_dict_file=None, save_every=-1, epochs=10):
         num_batches = int(len(self.dataset) / self.autoenc_batch_size)
         # data_loader = DataLoader(self.dataset, batch_size=self.autoenc_batch_size, shuffle=True, drop_last=True, generator=torch.Generator(device=device), collate_fn=mesh_collate)
 
         with torch.device(device):
             
             autoencoderOptimizer = torch.optim.Adam(self.autoEnc.parameters(), lr=self.autoenc_lr)
+            if optimizer_dict_file:
+                autoencoderOptimizer.load_state_dict(torch.load(optimizer_dict_file))
 
             for epoch in range(epochs):
                 # TODO: make model work properly with batch_size > 1. For now manual batches
@@ -131,7 +133,12 @@ class MeshGPTTrainer():
                     total_loss = 0
                     for i in range(self.autoenc_batch_size):
                         data = self.dataset[batch_id * self.autoenc_batch_size + i]
+                        for key in data:
+                            data[key] = data[key].to(device)
                         total_loss += self.autoEnc(data, pad_value)
+                        for key in data:
+                            data[key] = data[key].to('cpu')
+                        torch.cuda.empty_cache()
 
                     total_loss /= self.autoenc_batch_size
                     total_loss.backward()
@@ -168,20 +175,27 @@ class MeshGPTTrainer():
 
     def train_mesh_transformer(self, transformer_dict_file=None, save_every=8, epochs=1, minimize_slivers=True):
         num_batches = int(len(self.dataset) / self.transformer_batch_size)
-        data_loader = DataLoader(self.dataset, batch_size=self.transformer_batch_size, shuffle=True, drop_last=True, generator=torch.Generator(device=device), collate_fn=mesh_collate)
+        # data_loader = DataLoader(self.dataset, batch_size=self.transformer_batch_size, shuffle=True, drop_last=True, generator=torch.Generator(device=device), collate_fn=mesh_collate)
 
         with torch.device(device):
             transformerOptimizer = torch.optim.Adam(self.meshTransformer.parameters(), lr=self.transformer_lr)
             self.meshTransformer.freezeAutoEncoder()
 
+            torch.cuda.memory._dump_snapshot("init_transformer.pickle")
+
             for epoch in range(epochs):
-                for batch_id, data in enumerate(data_loader):
+                for batch_id in range(num_batches):
                     current_time = time.time()
 
                     total_loss = 0
                     for i in range(self.transformer_batch_size):
                         data = self.dataset[batch_id * self.transformer_batch_size + i]
+                        for key in data:
+                            data[key] = data[key].to(device)
                         total_loss += self.meshTransformer(data, pad_value, minimize_slivers=minimize_slivers)
+                        for key in data:
+                            data[key] = data[key].to('cpu')
+                        torch.cuda.empty_cache()
 
                     total_loss /= self.transformer_batch_size
                     total_loss.backward()
@@ -203,7 +217,6 @@ class MeshGPTTrainer():
                 torch.save(self.meshTransformer.state_dict(), transformer_dict_file + "_end.pth")
                 torch.save(transformerOptimizer.state_dict(), transformer_dict_file + "_optimizer_end.pth")
 
-            del data_loader
             del transformerOptimizer
             torch.cuda.empty_cache()
 

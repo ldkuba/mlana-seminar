@@ -18,9 +18,11 @@ pad_value = -2
 device = 'cuda'
 
 class MeshDataset(Dataset):
-    def __init__(self, meshes):
+    def __init__(self, meshes=[]):
         self.meshes = []
-        print("Loading dataset")
+        if len(meshes) == 0:
+            return
+        print("Loading and processing raw dataset")
         for x in tqdm(meshes):
             self.meshes.append(MeshDataset.load_model(x))
 
@@ -30,6 +32,13 @@ class MeshDataset(Dataset):
     def __getitem__(self, idx):
         return self.meshes[idx]
     
+    def save(self, filename):
+        torch.save(self.meshes, filename)
+
+    def load(self, filename):
+        print("Loading processed dataset")
+        self.meshes = torch.load(filename)
+
     # Loads the model and returns the sorted vertices, faces and edge list
     def load_model(filename):
         # load the mesh

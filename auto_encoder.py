@@ -103,7 +103,7 @@ class AutoEncoder(torch.nn.Module):
         quantized = quantized.view(-1, 3*quantized.size(-1))
 
         # Run the decoder
-        decoded_vertices = self.decoder(quantized)
+        decoded_vertices = self.decoder(quantized.unsqueeze(0)).squeeze(0)
         num_decoded_faces = decoded_vertices.size(0)
 
         # Split last dimension into coordinates per face
@@ -191,7 +191,7 @@ class AutoEncoder(torch.nn.Module):
             return face_codes
 
         # Run the decoder
-        decoded_vertices = self.decoder(quantized_face_features)
+        decoded_vertices = self.decoder(quantized_face_features.unsqueeze(0)).squeeze(0)
         num_decoded_faces = decoded_vertices.size(0) 
 
         # Split last dimension into coordinates per face

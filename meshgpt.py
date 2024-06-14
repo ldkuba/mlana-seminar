@@ -105,12 +105,12 @@ def mesh_collate(data):
 class MeshGPTTrainer():
     def __init__(self, dataset):
         self.autoEnc = ae.AutoEncoder().to(device)
-        self.autoenc_lr = 1e-3
-        self.autoenc_batch_size = 32
+        self.autoenc_lr = 1e-4
+        self.autoenc_batch_size = 1
 
         self.meshTransformer = mt.MeshTransformer(self.autoEnc, token_dim=512).to(device)
         self.transformer_lr = 1e-3
-        self.transformer_batch_size = 1
+        self.transformer_batch_size = 32
 
         self.dataset = dataset
 
@@ -170,6 +170,8 @@ class MeshGPTTrainer():
     def reconstruct_mesh(self, in_mesh_file):
         # reconstruct the mesh
         rec_model = MeshDataset.load_model(in_mesh_file)
+        for key in rec_model:
+            rec_model[key] = rec_model[key].to(device)
         loss, verts, faces = self.autoEnc(rec_model, pad_value, return_recon=True)
         return trimesh.Trimesh(verts.cpu().numpy(), faces.cpu().numpy())
 

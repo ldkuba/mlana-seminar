@@ -90,12 +90,12 @@ class GraphConvLayer(torch.nn.Module):
         super().__init__()
         self.conv = geom_nn.conv.SAGEConv(input_dims, output_dims)
         self.relu = torch.nn.ReLU()
-        self.batch_norm = torch.nn.BatchNorm1d(output_dims)
+        # self.batch_norm = torch.nn.BatchNorm1d(output_dims)
     
     def forward(self, data) -> torch.Tensor:
         x = self.conv(data.x, data.edge_list)
         x = self.relu(x)
-        x = self.batch_norm(x)
+        # x = self.batch_norm(x)
         return x
 
 class GraphEncoder(torch.nn.Module):

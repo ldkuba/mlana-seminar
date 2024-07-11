@@ -17,20 +17,42 @@ class ConvolutionBlock(torch.nn.Module):
                 torch.nn.BatchNorm1d(out_channels),
             )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
+        if mask is not None:
+            x = x.masked_fill(~mask, 0.0)
+        
         identity = x
 
         x = self.conv1(x)
+        if mask is not None:
+            x = x.masked_fill(~mask, 0.0)
         x = self.batch_norm1(x)
         x = self.relu(x)
 
+        if mask is not None:
+            x = x.masked_fill(~mask, 0.0)
         x = self.conv2(x)
+        if mask is not None:
+            x = x.masked_fill(~mask, 0.0)
         x = self.batch_norm2(x)
 
         identity = self.downsample(identity)
+        if mask is not None:
+            x = x.masked_fill(~mask, 0.0)
         x += identity # skip connection
+        if mask is not None:
+            x = x.masked_fill(~mask, 0.0)
+        
         x = self.relu(x)
+        if mask is not None:
+            x = x.masked_fill(~mask, 0.0)
         return x
+
+class SequentialArgs(torch.nn.Sequential):
+    def forward(self, input, **kwargs):
+        for module in self:
+            input = module(input, **kwargs)
+        return input
 
 class ResNet(torch.nn.Module):
     def __init__(self, block, input_dim, output_dim):
@@ -61,10 +83,10 @@ class ResNet(torch.nn.Module):
         for _ in range(1, num_blocks):
             layers.append(block(self.input_layer_dim, input_dim))
 
-        return torch.nn.Sequential(*layers)
+        return SequentialArgs(*layers)
 
     #: x: (batch_size, num_faces, face_feature_dim)
-    def forward(self, x):
+    def forward(self, x, mask = None):
         x = torch.swapaxes(x, 1, 2)
 
         x = self.conv1(x)
@@ -75,10 +97,10 @@ class ResNet(torch.nn.Module):
         x = self.layer_norm(x)
         x = torch.swapaxes(x, 1, 2)
 
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
+        x = self.layer1(x, mask=mask)
+        x = self.layer2(x, mask=mask)
+        x = self.layer3(x, mask=mask)
+        x = self.layer4(x, mask=mask)
 
         x = torch.swapaxes(x, 1, 2)
         x = self.fc(x)
@@ -90,6 +112,6 @@ class Decoder(torch.nn.Module):
         super().__init__()
         self.resnet34 = ResNet(ConvolutionBlock, 576, 1152)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.resnet34(x)
+    def forward(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
+        x = self.resnet34(x, mask)
         return x

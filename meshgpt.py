@@ -14,7 +14,7 @@ import time
 
 import trimesh
 
-pad_value = -2
+pad_value = -1
 device = 'cuda'
 
 class MeshDataset(Dataset):
@@ -42,7 +42,7 @@ class MeshDataset(Dataset):
     # Loads the model and returns the sorted vertices, faces and edge list
     def load_model(filename):
         # load the mesh
-        trimesh_mesh = trimesh.load(filename, merge_tex=True, merge_norm=True, force='mesh')
+        trimesh_mesh = trimesh.load(filename, force='mesh')
         vertices = torch.tensor(trimesh_mesh.vertices, dtype=torch.float32, device='cpu')
         faces = torch.tensor(trimesh_mesh.faces, dtype=torch.int64, device='cpu')
 
@@ -89,8 +89,8 @@ def mesh_collate(data):
     normals = torch.nn.utils.rnn.pad_sequence(normals, batch_first=True, padding_value=0)
 
     # create face mask
-    face_mask = faces.any(dim=-1) != pad_value
-    edge_mask = edge_list.any(dim=-1) != pad_value
+    face_mask = (faces != pad_value).any(dim=-1)
+    edge_mask = (edge_list != pad_value).any(dim=-1)
 
     return {'vertices': vertices,
             'faces': faces,
@@ -114,9 +114,15 @@ class MeshGPTTrainer():
 
         self.dataset = dataset
 
-    def train_autoencoder(self, autoenc_dict_file=None, optimizer_dict_file=None, save_every=-1, epochs=10):
+    def train_autoencoder(self, autoenc_dict_file=None, optimizer_dict_file=None, save_every=-1, epochs=10, batch_size=None, lr=None, commit_weight=1.0):
+        # Override training params if requested
+        if batch_size:
+            self.autoenc_batch_size = batch_size
+        if lr:
+            self.autoenc_lr = lr
+
         num_batches = int(len(self.dataset) / self.autoenc_batch_size)
-        # data_loader = DataLoader(self.dataset, batch_size=self.autoenc_batch_size, shuffle=True, drop_last=True, generator=torch.Generator(device=device), collate_fn=mesh_collate)
+        data_loader = DataLoader(self.dataset, batch_size=self.autoenc_batch_size, shuffle=True, drop_last=True, generator=torch.Generator(device=device), collate_fn=mesh_collate)
 
         with torch.device(device):
             
@@ -125,27 +131,22 @@ class MeshGPTTrainer():
                 autoencoderOptimizer.load_state_dict(torch.load(optimizer_dict_file))
 
             for epoch in range(epochs):
-                # TODO: make model work properly with batch_size > 1. For now manual batches
-                # for batch_id, data in enumerate(data_loader):
-                for batch_id in range(num_batches):
+                for batch_id, data in enumerate(data_loader):
                     current_time = time.time()
 
-                    total_loss = 0
-                    for i in range(self.autoenc_batch_size):
-                        data = self.dataset[batch_id * self.autoenc_batch_size + i]
-                        for key in data:
-                            data[key] = data[key].to(device)
-                        total_loss += self.autoEnc(data, pad_value)
-                        for key in data:
-                            data[key] = data[key].to('cpu')
-                        torch.cuda.empty_cache()
+                    for key in data:
+                        data[key] = data[key].to(device)
+                    loss, recon_loss, commit_loss = self.autoEnc(data, return_detailed_loss=True, commit_weight=commit_weight)
+                    for key in data:
+                        data[key] = data[key].to('cpu')
+                    torch.cuda.empty_cache()
 
-                    total_loss /= self.autoenc_batch_size
-                    total_loss.backward()
+                    loss.backward()
 
                     autoencoderOptimizer.step()
                     autoencoderOptimizer.zero_grad()
-                    print("loss: {}, time: {}, batch: {}, epoch: {}".format(total_loss, time.time() - current_time, batch_id, epoch))
+                    if epoch % 10 == 0 and batch_id == 0:
+                        print("loss: {}, recon_loss: {}, commit_loss: {}, time: {}, batch: {}, epoch: {}".format(loss, recon_loss, commit_loss, time.time() - current_time, batch_id, epoch))
 
                     if save_every > 0 and autoenc_dict_file:
                         if batch_id == num_batches - 1:
@@ -172,8 +173,8 @@ class MeshGPTTrainer():
         rec_model = MeshDataset.load_model(in_mesh_file)
         for key in rec_model:
             rec_model[key] = rec_model[key].to(device)
-        loss, verts, faces = self.autoEnc(rec_model, pad_value, return_recon=True)
-        return trimesh.Trimesh(verts.cpu().numpy(), faces.cpu().numpy())
+        verts, faces = self.autoEnc(mesh_collate([rec_model]), return_recon=True)
+        return trimesh.Trimesh(verts[0].cpu().numpy(), faces[0].cpu().numpy())
 
     def train_mesh_transformer(self, transformer_dict_file=None, save_every=8, epochs=1, minimize_slivers=True):
         num_batches = int(len(self.dataset) / self.transformer_batch_size)

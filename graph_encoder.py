@@ -55,11 +55,11 @@ def compute_angles_areas_normals(vertices, faces):
     e0_norm = torch.norm(e0, dim=1)
     e1_norm = torch.norm(e1, dim=1)
     e2_norm = torch.norm(e2, dim=1)
-    
+
     face_angles = torch.stack([
-        torch.acos(torch.sum(e0 * e1, dim=1) / (e0_norm * e1_norm)),
-        torch.acos(torch.sum(-e0 * e2, dim=1) / (e0_norm * e2_norm)),
-        torch.acos(torch.sum(-e1 * -e2, dim=1) / (e1_norm * e2_norm))
+        torch.acos(torch.clamp(torch.sum(e0 * e1, dim=1) / (e0_norm * e1_norm), -1.0, 1.0)),
+        torch.acos(torch.clamp(torch.sum(-e0 * e2, dim=1) / (e0_norm * e2_norm), -1.0, 1.0)),
+        torch.acos(torch.clamp(torch.sum(-e1 * -e2, dim=1) / (e1_norm * e2_norm), -1.0, 1.0))
     ], dim=1)
 
     return (face_angles, face_areas, face_normals)
@@ -83,37 +83,27 @@ def compute_edge_list(faces):
 class GraphEncoderData():
     def __init__(self, x, edge_list):
         self.x = x
-        self.edge_list = edge_list
-
-class GraphConvLayer(torch.nn.Module):
-    def __init__(self, input_dims, output_dims):
-        super().__init__()
-        self.conv = geom_nn.conv.SAGEConv(input_dims, output_dims)
-        self.relu = torch.nn.ReLU()
-        # self.batch_norm = torch.nn.BatchNorm1d(output_dims)
-    
-    def forward(self, data) -> torch.Tensor:
-        x = self.conv(data.x, data.edge_list)
-        x = self.relu(x)
-        # x = self.batch_norm(x)
-        return x
+        self.edge_list = edge_list.long()
 
 class GraphEncoder(torch.nn.Module):
     def __init__(self, input_dims):
         super().__init__()
         self.input_dims = input_dims
-        self.conv1 = GraphConvLayer(input_dims, 64)
-        self.conv2 = GraphConvLayer(64, 128)
-        self.conv3 = GraphConvLayer(128, 256)
-        self.conv4 = GraphConvLayer(256, 256)
-        self.conv5 = GraphConvLayer(256, 576)
+        self.conv1 = geom_nn.conv.SAGEConv(input_dims, 64, normalize=True, project=True)
+        self.silu1 = torch.nn.SiLU()
+        self.norm1 = torch.nn.LayerNorm(64)
+
+        self.conv2 = geom_nn.conv.SAGEConv(64, 128, normalize=True, project=True)
+        self.conv3 = geom_nn.conv.SAGEConv(128, 256, normalize=True, project=True)
+        self.conv4 = geom_nn.conv.SAGEConv(256, 256, normalize=True, project=True)
+        self.conv5 = geom_nn.conv.SAGEConv(256, 576, normalize=True, project=True)
     
     def forward(self, data) -> torch.Tensor:
         # SAGEConv expects the edge list in the shape (2, num_edges)
         data.edge_list = data.edge_list.transpose(0, 1)
-        x = self.conv1(GraphEncoderData(data.x, data.edge_list))
-        x = self.conv2(GraphEncoderData(x, data.edge_list))
-        x = self.conv3(GraphEncoderData(x, data.edge_list))
-        x = self.conv4(GraphEncoderData(x, data.edge_list))
-        x = self.conv5(GraphEncoderData(x, data.edge_list))
+        x = self.conv1(data.x, data.edge_list)
+        x = self.conv2(x, data.edge_list)
+        x = self.conv3(x, data.edge_list)
+        x = self.conv4(x, data.edge_list)
+        x = self.conv5(x, data.edge_list)
         return x

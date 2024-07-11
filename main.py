@@ -7,11 +7,17 @@ if __name__ == "__main__":
 
     # Create dataset
     meshes = []
+    recon_filename = ""
     for root, dirs, files in os.walk("../ShapeNetCore/filtered_meshes"):
         if len(files) > 0:
             for file in files:
                 if file.endswith(".obj"):
-                    meshes.append(root + "/" + file)
+                    meshes.extend([root + "/" + file] * 10)
+                    recon_filename = root + "/" + file
+                if len(meshes) >= 10:
+                    break
+        if len(meshes) >= 10:
+            break
 
     if(not os.path.exists("./processed_dataset.pt")):
         dataset = mg.MeshDataset(meshes)
@@ -25,7 +31,9 @@ if __name__ == "__main__":
     meshgpt = mg.MeshGPTTrainer(dataset)
 
     # Train autoencoder
-    meshgpt.train_autoencoder("./saved_models/autoencoder_fixed_v2", save_every=200, epochs=40)
+    meshgpt.train_autoencoder(epochs=5000, batch_size=10, lr=1e-4, commit_weight=1000.0)
+    reconstructed_mesh = meshgpt.reconstruct_mesh(recon_filename)
+    reconstructed_mesh.show()
 
     # Train mesh transformer
     # meshgpt.load_autoencoder("./saved_models/autoencoder_v5_end.pth")

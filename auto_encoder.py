@@ -228,7 +228,7 @@ class AutoEncoder(torch.nn.Module):
         decoded_vertices = decoded_vertices.view(batch_size, -1, self.num_discrete_values).swapaxes(1, 2)
         
         # Apply logmax
-        decoded_vertices = torch.log_softmax(decoded_vertices, dim=-1)
+        decoded_vertices = torch.log_softmax(decoded_vertices, dim=1)
 
         # Calculate target weights for loss function
         target_vertices_one_hot = torch.nn.functional.one_hot(vertex_discrete, num_classes=self.num_discrete_values).double()

@@ -62,6 +62,9 @@ def compute_angles_areas_normals(vertices, faces):
         torch.acos(torch.clamp(torch.sum(-e1 * -e2, dim=1) / (e1_norm * e2_norm), -1.0, 1.0))
     ], dim=1)
 
+    # Sanitize nans due to zero length edges
+    face_angles[torch.isnan(face_angles)] = math.pi / 2.0
+
     return (face_angles, face_areas, face_normals)
 
 # edge list between each pair of faces connected by an edge

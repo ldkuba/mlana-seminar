@@ -6,9 +6,11 @@ class ConvolutionBlock(torch.nn.Module):
         super().__init__()
         self.conv1 = torch.nn.Conv1d(in_channels, out_channels, kernel_size=3, padding=1)
         self.batch_norm1 = torch.nn.BatchNorm1d(out_channels)
-        self.relu = torch.nn.ReLU(inplace=True)
+        self.silu1 = torch.nn.SiLU()
         self.conv2 = torch.nn.Conv1d(out_channels, out_channels, kernel_size=3, padding=1)
         self.batch_norm2 = torch.nn.BatchNorm1d(out_channels)
+
+        self.silu2 = torch.nn.SiLU()
 
         self.downsample = torch.nn.Sequential()
         if in_channels != out_channels:
@@ -27,7 +29,7 @@ class ConvolutionBlock(torch.nn.Module):
         if mask is not None:
             x = x.masked_fill(~mask, 0.0)
         x = self.batch_norm1(x)
-        x = self.relu(x)
+        x = self.silu1(x)
 
         if mask is not None:
             x = x.masked_fill(~mask, 0.0)
@@ -43,7 +45,8 @@ class ConvolutionBlock(torch.nn.Module):
         if mask is not None:
             x = x.masked_fill(~mask, 0.0)
         
-        x = self.relu(x)
+        x = self.silu2(x)
+        
         if mask is not None:
             x = x.masked_fill(~mask, 0.0)
         return x
@@ -63,7 +66,7 @@ class ResNet(torch.nn.Module):
         self.conv1 = torch.nn.Conv1d(input_dim, self.input_layer_dim, kernel_size=7, padding=3,
                                bias=False)
         self.bn1 = torch.nn.BatchNorm1d(self.input_layer_dim)
-        self.relu = torch.nn.ReLU(inplace=True)
+        self.silu = torch.nn.SiLU()
         self.layer_norm = torch.nn.LayerNorm(self.input_layer_dim)
         
         self.layer1 = self._make_layer(block, 128, 3)
@@ -72,7 +75,6 @@ class ResNet(torch.nn.Module):
         self.layer4 = self._make_layer(block, 384, 3)
         
         self.fc = torch.nn.Linear(384, output_dim)
-
 
     def _make_layer(self, block, input_dim, num_blocks):
         layers = []
@@ -90,8 +92,8 @@ class ResNet(torch.nn.Module):
         x = torch.swapaxes(x, 1, 2)
 
         x = self.conv1(x)
+        x = self.silu(x)
         x = self.bn1(x)
-        x = self.relu(x)
 
         x = torch.swapaxes(x, 1, 2)
         x = self.layer_norm(x)

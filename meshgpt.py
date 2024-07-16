@@ -106,7 +106,7 @@ class MeshGPTTrainer():
     def __init__(self, dataset):
         self.autoEnc = ae.AutoEncoder().to(device)
         self.autoenc_lr = 1e-4
-        self.autoenc_batch_size = 1
+        self.autoenc_batch_size = 64
 
         self.meshTransformer = mt.MeshTransformer(self.autoEnc, token_dim=512).to(device)
         self.transformer_lr = 1e-3
@@ -131,9 +131,12 @@ class MeshGPTTrainer():
                 autoencoderOptimizer.load_state_dict(torch.load(optimizer_dict_file))
 
             for epoch in range(epochs):
-                for batch_id, data in enumerate(data_loader):
-                    current_time = time.time()
+                current_time = time.time()
+                loss_avg = 0
+                recon_loss_avg = 0
+                commit_loss_avg = 0
 
+                for batch_id, data in enumerate(data_loader):
                     for key in data:
                         data[key] = data[key].to(device)
                     loss, recon_loss, commit_loss = self.autoEnc(data, return_detailed_loss=True, commit_weight=commit_weight)
@@ -143,10 +146,12 @@ class MeshGPTTrainer():
 
                     loss.backward()
 
+                    loss_avg += loss.item()
+                    recon_loss_avg += recon_loss.item()
+                    commit_loss_avg += commit_loss.item()
+
                     autoencoderOptimizer.step()
                     autoencoderOptimizer.zero_grad()
-                    if epoch % 10 == 0 and batch_id == 0:
-                        print("loss: {}, recon_loss: {}, commit_loss: {}, time: {}, batch: {}, epoch: {}".format(loss, recon_loss, commit_loss, time.time() - current_time, batch_id, epoch))
 
                     if save_every > 0 and autoenc_dict_file:
                         if batch_id == num_batches - 1:
@@ -155,6 +160,11 @@ class MeshGPTTrainer():
                         elif batch_id % save_every == 0:
                             torch.save(self.autoEnc.state_dict(), autoenc_dict_file + "_epoch{}".format(epoch) + "_batch{}".format(batch_id) + ".pth")
                             torch.save(autoencoderOptimizer.state_dict(), autoenc_dict_file + "_epoch{}".format(epoch) + "_optimizer_batch{}".format(batch_id) + ".pth")
+
+                loss_avg /= num_batches
+                recon_loss_avg /= num_batches
+                commit_loss_avg /= num_batches
+                print("loss: {}, recon_loss: {}, commit_loss: {}, time: {}, epoch: {}".format(loss_avg, recon_loss_avg, commit_loss_avg, time.time() - current_time, epoch))
 
             # save the trained autoencoder
             if autoenc_dict_file:

@@ -1,36 +1,6 @@
 import torch
 import torch.nn.functional as F
 
-class SqueezeExcite(torch.nn.Module):
-    def __init__(
-        self,
-        dim,
-        reduction_factor = 4,
-        min_dim = 16
-    ):
-        super().__init__()
-        dim_inner = max(dim // reduction_factor, min_dim)
-
-        self.net = torch.nn.Sequential(
-            torch.nn.Linear(dim, dim_inner),
-            torch.nn.SiLU(),
-            torch.nn.Linear(dim_inner, dim),
-            torch.nn.Sigmoid()
-        )
-
-    def forward(self, x, mask = None):
-        if mask is not None:
-            x = x.masked_fill(~mask, 0.)
-
-            num = torch.sum(x, dim=2)
-            den = torch.sum(mask.float(), dim=2)
-            avg = num / den.clamp(min = 1e-5)
-        else:
-            avg = torch.mean(x, dim=2)
-
-        net_out = self.net(avg)
-        return x * net_out.unsqueeze(-1)
-
 class ConvolutionBlock(torch.nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
@@ -39,9 +9,8 @@ class ConvolutionBlock(torch.nn.Module):
         self.silu1 = torch.nn.SiLU()
         self.conv2 = torch.nn.Conv1d(out_channels, out_channels, kernel_size=3, padding=1)
         self.batch_norm2 = torch.nn.BatchNorm1d(out_channels)
-        self.silu2 = torch.nn.SiLU()
 
-        self.squueze_excite = SqueezeExcite(out_channels)
+        self.silu2 = torch.nn.SiLU()
 
         self.downsample = torch.nn.Sequential()
         if in_channels != out_channels:
@@ -77,8 +46,6 @@ class ConvolutionBlock(torch.nn.Module):
             x = x.masked_fill(~mask, 0.0)
         
         x = self.silu2(x)
-
-        x = self.squueze_excite(x, mask)
         
         if mask is not None:
             x = x.masked_fill(~mask, 0.0)

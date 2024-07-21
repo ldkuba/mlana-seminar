@@ -105,6 +105,10 @@ class GraphEncoder(torch.nn.Module):
         # SAGEConv expects the edge list in the shape (2, num_edges)
         data.edge_list = data.edge_list.transpose(0, 1)
         x = self.conv1(data.x, data.edge_list)
+
+        x = self.silu1(x)
+        x = self.norm1(x)
+
         x = self.conv2(x, data.edge_list)
         x = self.conv3(x, data.edge_list)
         x = self.conv4(x, data.edge_list)

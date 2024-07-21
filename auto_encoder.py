@@ -105,7 +105,7 @@ class AutoEncoder(torch.nn.Module):
         self.decoder = dec.Decoder()
 
         self.gauss_size = 5
-        gauss = torch.tensor(gaussian_filter1d(self.gauss_size, 0.4), device='cuda')
+        gauss = torch.tensor(gaussian_filter1d(self.gauss_size, 0.1), device='cuda')
         self.smooth_kernel = gauss / gauss.sum()
 
     @torch.no_grad()
@@ -118,6 +118,7 @@ class AutoEncoder(torch.nn.Module):
 
         # Run the decoder
         decoded_vertices = self.decoder(quantized)
+
         num_decoded_faces = decoded_vertices.size(1)
 
         # Split last dimension into coordinates per face
@@ -145,6 +146,29 @@ class AutoEncoder(torch.nn.Module):
 
         return reconstructed_vertices, reconstructed_faces
 
+
+    def reconstruction_loss(self, decoded_vertices, face_mask, batch_size, vertex_discrete):
+        # Reshape to (batch, discrete_values, ...)
+        decoded_vertices = decoded_vertices.view(batch_size, -1, self.num_discrete_values).swapaxes(1, 2)
+        
+        # Apply logmax
+        decoded_vertices = torch.log_softmax(decoded_vertices, dim=1)
+
+        # Calculate target weights for loss function
+        target_vertices_one_hot = torch.nn.functional.one_hot(vertex_discrete, num_classes=self.num_discrete_values).double()
+        target_vertices_one_hot = target_vertices_one_hot.view(batch_size, -1, self.num_discrete_values)
+        groups = target_vertices_one_hot.size(-2)
+
+        smooth_kernel = self.smooth_kernel.repeat(groups).view(groups, self.gauss_size).unsqueeze(1)
+        target_vertices_weights = torch.nn.functional.conv1d(target_vertices_one_hot, weight=smooth_kernel, groups=groups, padding=self.gauss_size//2)
+        target_vertices_weights = target_vertices_weights.swapaxes(1, 2)
+
+        # Calculate reconstruction loss
+        reconstruction_loss = (-target_vertices_weights * decoded_vertices).sum(dim=1)
+        recon_face_mask = face_mask.repeat_interleave(9, dim=1)
+        reconstruction_loss = reconstruction_loss[recon_face_mask].mean()
+
+        return reconstruction_loss
 
     # Data:
     # - vertices: Tensor of shape (batch, num_vertices, 3)
@@ -219,36 +243,25 @@ class AutoEncoder(torch.nn.Module):
         if return_recon:
             with torch.no_grad():
                 # Split last dimension into coordinates per face
-                decoded_vertices = decoded_vertices.view(batch_size, num_faces, 9, -1)
+                decoded_vertices = decoded_vertices.view(batch_size, num_faces, 9, self.num_discrete_values)
 
                 reconstructed_vertices, reconstructed_faces = self.decoded_vertices_to_mesh(decoded_vertices)
+
+                if return_detailed_loss:
+                    recon_loss = self.reconstruction_loss(decoded_vertices, data['face_mask'], batch_size, vertex_discrete)
+                    commit_loss = commit_losses.sum() * commit_weight
+                    total_loss = recon_loss + commit_loss
+                    return reconstructed_vertices, reconstructed_faces, total_loss, recon_loss, commit_loss
+
                 return reconstructed_vertices, reconstructed_faces
 
-        # Reshape to (batch, discrete_values, ...)
-        decoded_vertices = decoded_vertices.view(batch_size, -1, self.num_discrete_values).swapaxes(1, 2)
-        
-        # Apply logmax
-        decoded_vertices = torch.log_softmax(decoded_vertices, dim=1)
-
-        # Calculate target weights for loss function
-        target_vertices_one_hot = torch.nn.functional.one_hot(vertex_discrete, num_classes=self.num_discrete_values).double()
-        target_vertices_one_hot = target_vertices_one_hot.view(batch_size, -1, self.num_discrete_values)
-        groups = target_vertices_one_hot.size(-2)
-
-        smooth_kernel = self.smooth_kernel.repeat(groups).view(groups, self.gauss_size).unsqueeze(1)
-        target_vertices_weights = torch.nn.functional.conv1d(target_vertices_one_hot, weight=smooth_kernel, groups=groups, padding=self.gauss_size//2)
-        target_vertices_weights = target_vertices_weights.swapaxes(1, 2)
-
-        # Calculate reconstruction loss
-        reconstruction_loss = (-target_vertices_weights * decoded_vertices).sum(dim=1)
-        recon_face_mask = data['face_mask'].repeat_interleave(9, dim=1)
-        reconstruction_loss = reconstruction_loss[recon_face_mask].mean()
+        recon_loss = self.reconstruction_loss(decoded_vertices, data['face_mask'], batch_size, vertex_discrete)
 
         commit_loss = commit_losses.sum() * commit_weight
-        total_loss = reconstruction_loss + commit_loss
+        total_loss = recon_loss + commit_loss
 
         if return_detailed_loss:
-            return total_loss, reconstruction_loss, commit_loss
+            return total_loss, recon_loss, commit_loss
         
         return total_loss
 

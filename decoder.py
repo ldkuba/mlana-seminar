@@ -65,7 +65,6 @@ class ResNet(torch.nn.Module):
 
         self.conv1 = torch.nn.Conv1d(input_dim, self.input_layer_dim, kernel_size=7, padding=3,
                                bias=False)
-        self.bn1 = torch.nn.BatchNorm1d(self.input_layer_dim)
         self.silu = torch.nn.SiLU()
         self.layer_norm = torch.nn.LayerNorm(self.input_layer_dim)
         
@@ -90,10 +89,11 @@ class ResNet(torch.nn.Module):
     #: x: (batch_size, num_faces, face_feature_dim)
     def forward(self, x, mask = None):
         x = torch.swapaxes(x, 1, 2)
+        if mask is not None:
+            x = x.masked_fill(~mask, 0.0)
 
         x = self.conv1(x)
         x = self.silu(x)
-        x = self.bn1(x)
 
         x = torch.swapaxes(x, 1, 2)
         x = self.layer_norm(x)

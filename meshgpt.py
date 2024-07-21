@@ -9,6 +9,7 @@ import graph_encoder as ge
 import mesh_transformer as mt
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
+import wandb
 
 import time
 
@@ -115,11 +116,31 @@ class MeshGPTTrainer():
         self.dataset = dataset
 
     def train_autoencoder(self, autoenc_dict_file=None, optimizer_dict_file=None, save_every=-1, epochs=10, batch_size=None, lr=None, commit_weight=1.0):
+        
+        # DONT FORGET TO SET MODEL TO TRAIN MODE
+        self.autoEnc.train()
+
         # Override training params if requested
         if batch_size:
             self.autoenc_batch_size = batch_size
         if lr:
             self.autoenc_lr = lr
+
+        # Initialize wandb
+        if autoenc_dict_file is not None:
+            wandb.init(project="meshgpt-autoencoder", name=autoenc_dict_file.split('/')[-1], config={
+                "learning_rate": self.autoenc_lr,
+                "architecture": "MeshGPT-Autoencoder",
+                "epochs": epochs,
+            })
+        else:
+            wandb.init(project="meshgpt-autoencoder", config={
+                "learning_rate": self.autoenc_lr,
+                "architecture": "MeshGPT-Autoencoder",
+                "epochs": epochs,
+            })
+
+        wandb.watch(self.autoEnc, log="all", log_freq=50)
 
         num_batches = int(len(self.dataset) / self.autoenc_batch_size)
         data_loader = DataLoader(self.dataset, batch_size=self.autoenc_batch_size, shuffle=True, drop_last=True, generator=torch.Generator(device=device), collate_fn=mesh_collate)
@@ -165,11 +186,14 @@ class MeshGPTTrainer():
                 recon_loss_avg /= num_batches
                 commit_loss_avg /= num_batches
                 print("loss: {}, recon_loss: {}, commit_loss: {}, time: {}, epoch: {}".format(loss_avg, recon_loss_avg, commit_loss_avg, time.time() - current_time, epoch))
+                wandb.log({"loss": loss_avg, "recon_loss": recon_loss_avg, "commit_loss": commit_loss_avg})
 
             # save the trained autoencoder
             if autoenc_dict_file:
                 torch.save(self.autoEnc.state_dict(), autoenc_dict_file + "_end.pth")
                 torch.save(autoencoderOptimizer.state_dict(), autoenc_dict_file + "_optimizer_end.pth")
+
+            wandb.finish()
 
             # del data_loader
             del autoencoderOptimizer
@@ -178,12 +202,27 @@ class MeshGPTTrainer():
     def load_autoencoder(self, autoenc_dict_file):
         self.autoEnc.load_state_dict(torch.load(autoenc_dict_file))
 
-    def reconstruct_mesh(self, in_mesh_file):
+    def reconstruct_mesh(self, in_mesh_files, wandb_name=None):
+
+        # DONT FORGET TO SET MODEL TO EVAL MODE
+        self.autoEnc.eval()
+
+        if wandb_name:
+            wandb.init(project="meshgpt-autoencoder", name=wandb_name)
+            wandb.watch(self.autoEnc, log="all", log_freq=1)
+
         # reconstruct the mesh
-        rec_model = MeshDataset.load_model(in_mesh_file)
-        for key in rec_model:
-            rec_model[key] = rec_model[key].to(device)
-        verts, faces = self.autoEnc(mesh_collate([rec_model]), return_recon=True)
+        rec_dataset = MeshDataset(in_mesh_files)
+        meshes = mesh_collate(rec_dataset.meshes)
+        for key in meshes:
+            meshes[key] = meshes[key].to(device)
+        with torch.no_grad():
+            verts, faces, loss, recon_loss, commit_loss = self.autoEnc(meshes, return_recon=True, return_detailed_loss=True)
+            
+        if wandb_name:
+            wandb.log({"loss": loss, "recon_loss": recon_loss, "commit_loss": commit_loss})
+            wandb.finish()
+
         return trimesh.Trimesh(verts[0].cpu().numpy(), faces[0].cpu().numpy())
 
     def train_mesh_transformer(self, transformer_dict_file=None, save_every=8, epochs=1, minimize_slivers=True):

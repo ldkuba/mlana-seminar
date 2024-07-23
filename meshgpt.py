@@ -115,7 +115,7 @@ class MeshGPTTrainer():
 
         self.dataset = dataset
 
-    def train_autoencoder(self, autoenc_dict_file=None, optimizer_dict_file=None, save_every=-1, epochs=10, batch_size=None, lr=None, commit_weight=1.0):
+    def train_autoencoder(self, autoenc_dict_file=None, optimizer_dict_file=None, save_every=-1, epochs=10, batch_size=None, lr=None, commit_weight=1.0, wandb_name=None):
         
         # DONT FORGET TO SET MODEL TO TRAIN MODE
         self.autoEnc.train()
@@ -127,20 +127,16 @@ class MeshGPTTrainer():
             self.autoenc_lr = lr
 
         # Initialize wandb
-        if autoenc_dict_file is not None:
-            wandb.init(project="meshgpt-autoencoder", name=autoenc_dict_file.split('/')[-1], config={
+        if wandb_name:
+            wandb.init(project="meshgpt-autoencoder", name=wandb_name, config={
                 "learning_rate": self.autoenc_lr,
                 "architecture": "MeshGPT-Autoencoder",
                 "epochs": epochs,
+                "batch_size": self.autoenc_batch_size,
+                "commit_weight": commit_weight,
+                "gauss_sigma": self.autoEnc.gauss_sigma
             })
-        else:
-            wandb.init(project="meshgpt-autoencoder", config={
-                "learning_rate": self.autoenc_lr,
-                "architecture": "MeshGPT-Autoencoder",
-                "epochs": epochs,
-            })
-
-        wandb.watch(self.autoEnc, log="all", log_freq=50)
+            wandb.watch(self.autoEnc, log="all", log_freq=save_every)
 
         num_batches = int(len(self.dataset) / self.autoenc_batch_size)
         data_loader = DataLoader(self.dataset, batch_size=self.autoenc_batch_size, shuffle=True, drop_last=True, generator=torch.Generator(device=device), collate_fn=mesh_collate)
@@ -174,26 +170,25 @@ class MeshGPTTrainer():
                     autoencoderOptimizer.step()
                     autoencoderOptimizer.zero_grad()
 
-                    if save_every > 0 and autoenc_dict_file:
-                        if batch_id == num_batches - 1:
-                            torch.save(self.autoEnc.state_dict(), autoenc_dict_file + "_epoch{}".format(epoch) + "_last.pth")
-                            torch.save(autoencoderOptimizer.state_dict(), autoenc_dict_file + "_epoch{}".format(epoch) + "_optimizer_last.pth")
-                        elif batch_id % save_every == 0:
-                            torch.save(self.autoEnc.state_dict(), autoenc_dict_file + "_epoch{}".format(epoch) + "_batch{}".format(batch_id) + ".pth")
-                            torch.save(autoencoderOptimizer.state_dict(), autoenc_dict_file + "_epoch{}".format(epoch) + "_optimizer_batch{}".format(batch_id) + ".pth")
-
                 loss_avg /= num_batches
                 recon_loss_avg /= num_batches
                 commit_loss_avg /= num_batches
                 print("loss: {}, recon_loss: {}, commit_loss: {}, time: {}, epoch: {}".format(loss_avg, recon_loss_avg, commit_loss_avg, time.time() - current_time, epoch))
-                wandb.log({"loss": loss_avg, "recon_loss": recon_loss_avg, "commit_loss": commit_loss_avg})
+                if wandb_name:
+                    wandb.log({"loss": loss_avg, "recon_loss": recon_loss_avg, "commit_loss": commit_loss_avg})
+
+                if save_every > 0 and autoenc_dict_file:
+                    if epoch % save_every == 0:
+                        torch.save(self.autoEnc.state_dict(), autoenc_dict_file + "_epoch{}".format(epoch) + ".pth")
+                        torch.save(autoencoderOptimizer.state_dict(), autoenc_dict_file + "_epoch{}".format(epoch) + ".pth")
 
             # save the trained autoencoder
             if autoenc_dict_file:
                 torch.save(self.autoEnc.state_dict(), autoenc_dict_file + "_end.pth")
                 torch.save(autoencoderOptimizer.state_dict(), autoenc_dict_file + "_optimizer_end.pth")
 
-            wandb.finish()
+            if wandb_name:
+                wandb.finish()
 
             # del data_loader
             del autoencoderOptimizer

@@ -104,8 +104,9 @@ class AutoEncoder(torch.nn.Module):
         self.vector_quantizer = vq.ResidualVQ(dim=192, num_quantizers=2, codebook_size=self.codebook_size, shared_codebook=True, stochastic_sample_codes = True, commitment_weight=1.0)
         self.decoder = dec.Decoder()
 
-        self.gauss_size = 5
-        gauss = torch.tensor(gaussian_filter1d(self.gauss_size, 0.1), device='cuda')
+        self.gauss_size = 3
+        self.gauss_sigma = 0.01
+        gauss = torch.tensor(gaussian_filter1d(self.gauss_size, self.gauss_sigma), device='cuda')
         self.smooth_kernel = gauss / gauss.sum()
 
     @torch.no_grad()

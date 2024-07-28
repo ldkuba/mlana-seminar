@@ -134,7 +134,8 @@ class MeshGPTTrainer():
                 "epochs": epochs,
                 "batch_size": self.autoenc_batch_size,
                 "commit_weight": commit_weight,
-                "gauss_sigma": self.autoEnc.gauss_sigma
+                "gauss_sigma": self.autoEnc.gauss_sigma,
+                "gauss_kernel_size": self.autoEnc.gauss_size
             })
             wandb.watch(self.autoEnc, log="all", log_freq=save_every)
 
@@ -180,7 +181,7 @@ class MeshGPTTrainer():
                 if save_every > 0 and autoenc_dict_file:
                     if epoch % save_every == 0:
                         torch.save(self.autoEnc.state_dict(), autoenc_dict_file + "_epoch{}".format(epoch) + ".pth")
-                        torch.save(autoencoderOptimizer.state_dict(), autoenc_dict_file + "_epoch{}".format(epoch) + ".pth")
+                        torch.save(autoencoderOptimizer.state_dict(), autoenc_dict_file + "_optimizer_epoch{}".format(epoch) + ".pth")
 
             # save the trained autoencoder
             if autoenc_dict_file:

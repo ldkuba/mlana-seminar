@@ -128,7 +128,7 @@ def mesh_collate(data):
 
 
 class MeshGPTTrainer:
-    def __init__(self, dataset):
+    def __init__(self):
         self.autoEnc = ae.AutoEncoder().to(device)
         self.autoenc_lr = 1e-4
         self.autoenc_batch_size = 64
@@ -139,10 +139,9 @@ class MeshGPTTrainer:
         self.transformer_lr = 1e-3
         self.transformer_batch_size = 32
 
-        self.dataset = dataset
-
     def train_autoencoder(
         self,
+        dataset: MeshDataset,
         autoenc_dict_file=None,
         optimizer_dict_file=None,
         save_every=-1,
@@ -206,9 +205,9 @@ class MeshGPTTrainer:
                 )
             wandb.watch(self.autoEnc, log="all", log_freq=save_every)
 
-        num_batches = int(len(self.dataset) / self.autoenc_batch_size)
+        num_batches = int(len(dataset) / self.autoenc_batch_size)
         data_loader = DataLoader(
-            self.dataset,
+            dataset,
             batch_size=self.autoenc_batch_size,
             shuffle=True,
             drop_last=True,

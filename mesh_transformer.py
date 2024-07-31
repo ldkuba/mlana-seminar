@@ -137,7 +137,7 @@ class MeshTransformer(torch.nn.Module):
         return codes
 
     def process_codes(self, face_codes, cache=None, append_eos=True, return_logits=False, return_cache=False, minimize_slivers=False):
-        assert face_codes.size(0) <= self.context_length, "Input mesh is too large (max 500 faces)"
+        assert face_codes.size(-1) <= self.context_length, "Input mesh is too large (max 500 faces)"
 
         # Save target face codes
         target = torch.cat((torch.tensor([self.sos_id], device='cuda'), face_codes.clone(), torch.tensor([self.eos_id], device='cuda')))
@@ -183,7 +183,9 @@ class MeshTransformer(torch.nn.Module):
             face_logits[:, self.eos_id] = 0.0
             face_codes = torch.multinomial(face_logits, num_samples=1)
 
-            verts, faces = self.autoencoder.decode_mesh(face_codes.squeeze(1))
+            verts, faces = self.autoencoder.decode_mesh(face_codes.squeeze(1).unsqueeze(0))
+            verts = verts.squeeze(0)
+            faces = faces.squeeze(0)
             face_vertices = verts[faces]
             loss += calculate_sliver_loss(face_vertices)
 
@@ -198,6 +200,14 @@ class MeshTransformer(torch.nn.Module):
         with torch.no_grad():
             face_codes = self.autoencoder(data, pad_value, return_only_codes=True)
             # Flatten face tokens
-            face_codes = face_codes.flatten(0)
+            face_codes = face_codes.flatten(-2)
 
+        # TODO: Implement batched version
+        if len(face_codes.shape) > 1:
+            if face_codes.size(0) > 1:
+                raise NotImplementedError("Batched version not implemented")
+            else:
+                face_codes = face_codes.squeeze(0)
+
+        face_codes = face_codes[:200*6]
         return self.process_codes(face_codes, append_eos=True, minimize_slivers=minimize_slivers)

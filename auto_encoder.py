@@ -115,7 +115,7 @@ class AutoEncoder(torch.nn.Module):
 
         # Get quantized vectors from codebooks
         face_codes = face_codes.view(batch_size, -1, 2)
-        quantized = self.vector_quantizer.get_output_from_indices(face_codes)
+        quantized = self.vector_quantizer.get_output_from_indices(face_codes).view(batch_size, -1, 576)
 
         # Run the decoder
         decoded_vertices = self.decoder(quantized)

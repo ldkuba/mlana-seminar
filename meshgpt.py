@@ -142,15 +142,15 @@ class MeshGPTTrainer:
     def train_autoencoder(
         self,
         dataset: MeshDataset,
-        autoenc_dict_file=None,
-        optimizer_dict_file=None,
+        autoenc_dict_file=None, # File to save the trained autoencoder
+        optimizer_dict_file=None, # If continuing training, supply the optimizer state dict
         save_every=-1,
         epochs=10,
         batch_size=None,
         lr=None,
         commit_weight=1.0,
         wandb_path=None,
-        wandb_resume=False
+        wandb_resume=False,
     ):
 
         # DONT FORGET TO SET MODEL TO TRAIN MODE
@@ -168,10 +168,13 @@ class MeshGPTTrainer:
             wandb_path_split = wandb_path.split("/")
             if wandb_resume:
                 # Find the run
-                wandb_runs = wandb.Api().runs(wandb_path_split[0] + "/" + wandb_path_split[1], filters={"display_name": wandb_path_split[2]})
+                wandb_runs = wandb.Api().runs(
+                    wandb_path_split[0] + "/" + wandb_path_split[1],
+                    filters={"display_name": wandb_path_split[2]},
+                )
                 if len(wandb_runs) != 1:
                     raise ValueError("Invalid wandb path")
-                
+
                 # Resume it
                 wandb.init(
                     entity=wandb_path_split[0],
@@ -179,10 +182,10 @@ class MeshGPTTrainer:
                     id=wandb_runs[0].id,
                     resume="must",
                     config={
-                        "learning_rate": self.autoenc_lr,
+                        "learning_rate": lr,
                         "architecture": "MeshGPT-Autoencoder",
                         "epochs": epochs,
-                        "batch_size": self.autoenc_batch_size,
+                        "batch_size": batch_size,
                         "commit_weight": commit_weight,
                         "gauss_sigma": self.autoEnc.gauss_sigma,
                         "gauss_kernel_size": self.autoEnc.gauss_size,
@@ -194,10 +197,10 @@ class MeshGPTTrainer:
                     project=wandb_path_split[1],
                     name=wandb_path_split[2],
                     config={
-                        "learning_rate": self.autoenc_lr,
+                        "learning_rate": lr,
                         "architecture": "MeshGPT-Autoencoder",
                         "epochs": epochs,
-                        "batch_size": self.autoenc_batch_size,
+                        "batch_size": batch_size,
                         "commit_weight": commit_weight,
                         "gauss_sigma": self.autoEnc.gauss_sigma,
                         "gauss_kernel_size": self.autoEnc.gauss_size,
@@ -205,10 +208,10 @@ class MeshGPTTrainer:
                 )
             wandb.watch(self.autoEnc, log="all", log_freq=save_every)
 
-        num_batches = int(len(dataset) / self.autoenc_batch_size)
+        num_batches = int(len(dataset) / batch_size)
         data_loader = DataLoader(
             dataset,
-            batch_size=self.autoenc_batch_size,
+            batch_size=batch_size,
             shuffle=True,
             drop_last=True,
             generator=torch.Generator(device=device),
@@ -217,9 +220,7 @@ class MeshGPTTrainer:
 
         with torch.device(device):
 
-            autoencoderOptimizer = torch.optim.Adam(
-                self.autoEnc.parameters(), lr=self.autoenc_lr
-            )
+            autoencoderOptimizer = torch.optim.Adam(self.autoEnc.parameters(), lr=lr)
             if optimizer_dict_file:
                 autoencoderOptimizer.load_state_dict(torch.load(optimizer_dict_file))
 
@@ -328,75 +329,140 @@ class MeshGPTTrainer:
         return trimesh.Trimesh(verts[0].cpu().numpy(), faces[0].cpu().numpy())
 
     def train_mesh_transformer(
-        self, transformer_dict_file=None, save_every=8, epochs=1, minimize_slivers=True
+        self,
+        dataset: MeshDataset,
+        transformer_dict_file=None,
+        optimizer_dict_file=None,
+        save_every=-1,
+        epochs=10,
+        batch_size=None,
+        lr=None,
+        wandb_path=None,
+        wandb_resume=False,
+        minimize_slivers=True,
     ):
-        num_batches = int(len(self.dataset) / self.transformer_batch_size)
-        # data_loader = DataLoader(self.dataset, batch_size=self.transformer_batch_size, shuffle=True, drop_last=True, generator=torch.Generator(device=device), collate_fn=mesh_collate)
+        # Set model to train mode
+        self.meshTransformer.train()
+
+        # Override training params if requested
+        if not batch_size:
+            batch_size = self.transformer_batch_size
+        if not lr:
+            lr = self.transformer_lr
+
+        # TODO: Support batched training
+        if batch_size > 1:
+            raise ValueError("Batched training not supported")
+
+        # Initialize wandb
+        if wandb_path:
+            # 0 - entity, 1 - project, 2 - run
+            wandb_path_split = wandb_path.split("/")
+            if wandb_resume:
+                # Find the run
+                wandb_runs = wandb.Api().runs(
+                    wandb_path_split[0] + "/" + wandb_path_split[1],
+                    filters={"display_name": wandb_path_split[2]},
+                )
+                if len(wandb_runs) != 1:
+                    raise ValueError("Invalid wandb path")
+
+                # Resume it
+                wandb.init(
+                    entity=wandb_path_split[0],
+                    project=wandb_path_split[1],
+                    id=wandb_runs[0].id,
+                    resume="must",
+                    config={
+                        "learning_rate": lr,
+                        "architecture": "MeshGPT-Transformer",
+                        "epochs": epochs,
+                        "batch_size": batch_size,
+                        "sliver_minimization": minimize_slivers,
+                    },
+                )
+            else:
+                wandb.init(
+                    entity=wandb_path_split[0],
+                    project=wandb_path_split[1],
+                    name=wandb_path_split[2],
+                    config={
+                        "learning_rate": lr,
+                        "architecture": "MeshGPT-Transformer",
+                        "epochs": epochs,
+                        "batch_size": batch_size,
+                        "sliver_minimization": minimize_slivers,
+                    },
+                )
+            wandb.watch(self.meshTransformer, log="all", log_freq=save_every)
+
+        num_batches = int(len(dataset) / batch_size)
+        data_loader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            drop_last=True,
+            generator=torch.Generator(device=device),
+            collate_fn=mesh_collate,
+        )
 
         with torch.device(device):
-            transformerOptimizer = torch.optim.Adam(
-                self.meshTransformer.parameters(), lr=self.transformer_lr
-            )
+
+            # Freeze the autoencoder updates
             self.meshTransformer.freezeAutoEncoder()
 
-            torch.cuda.memory._dump_snapshot("init_transformer.pickle")
+            transformerOptimizer = torch.optim.Adam(
+                self.meshTransformer.parameters(), lr=lr
+            )
+            if optimizer_dict_file:
+                transformerOptimizer.load_state_dict(torch.load(optimizer_dict_file))
+
+            # torch.cuda.memory._dump_snapshot("init_transformer.pickle")
 
             for epoch in range(epochs):
-                for batch_id in range(num_batches):
-                    current_time = time.time()
+                current_time = time.time()
+                loss_avg = 0
 
-                    total_loss = 0
-                    for i in range(self.transformer_batch_size):
-                        data = self.dataset[batch_id * self.transformer_batch_size + i]
-                        for key in data:
-                            data[key] = data[key].to(device)
-                        total_loss += self.meshTransformer(
-                            data, pad_value, minimize_slivers=minimize_slivers
-                        )
-                        for key in data:
-                            data[key] = data[key].to("cpu")
-                        torch.cuda.empty_cache()
+                for batch_id, data in enumerate(data_loader):
+                    for key in data:
+                        data[key] = data[key].to(device)
+                    loss = self.meshTransformer(
+                        data, pad_value, minimize_slivers=minimize_slivers
+                    )
+                    for key in data:
+                        data[key] = data[key].to("cpu")
+                    torch.cuda.empty_cache()
 
-                    total_loss /= self.transformer_batch_size
-                    total_loss.backward()
+                    loss.backward()
+
+                    loss_avg += loss.item()
 
                     transformerOptimizer.step()
                     transformerOptimizer.zero_grad()
-                    print(
-                        "loss: {}, time: {}, batch: {}, epoch: {}".format(
-                            total_loss, time.time() - current_time, batch_id, epoch
-                        )
-                    )
 
-                    if save_every > 0 and transformer_dict_file:
-                        if batch_id == num_batches - 1:
-                            torch.save(
-                                self.autoEnc.state_dict(),
-                                transformer_dict_file
-                                + "_epoch{}".format(epoch)
-                                + "_last.pth",
-                            )
-                            torch.save(
-                                transformerOptimizer.state_dict(),
-                                transformer_dict_file
-                                + "_epoch{}".format(epoch)
-                                + "_optimizer_last.pth",
-                            )
-                        elif batch_id % save_every == 0:
-                            torch.save(
-                                self.autoEnc.state_dict(),
-                                transformer_dict_file
-                                + "_epoch{}".format(epoch)
-                                + "_batch{}".format(batch_id)
-                                + ".pth",
-                            )
-                            torch.save(
-                                transformerOptimizer.state_dict(),
-                                transformer_dict_file
-                                + "_epoch{}".format(epoch)
-                                + "_optimizer_batch{}".format(batch_id)
-                                + ".pth",
-                            )
+                loss_avg /= num_batches
+                print(
+                    "loss: {}, time: {}, epoch: {}".format(
+                        loss_avg,
+                        time.time() - current_time,
+                        epoch,
+                    )
+                )
+                if wandb_path:
+                    wandb.log({"loss": loss_avg})
+
+                if save_every > 0 and transformer_dict_file:
+                    if epoch % save_every == 0:
+                        torch.save(
+                            self.meshTransformer.state_dict(),
+                            transformer_dict_file + "_epoch{}".format(epoch) + ".pth",
+                        )
+                        torch.save(
+                            transformerOptimizer.state_dict(),
+                            transformer_dict_file
+                            + "_optimizer_epoch{}".format(epoch)
+                            + ".pth",
+                        )
 
             # Save the trained mesh transformer
             if transformer_dict_file:
@@ -408,6 +474,9 @@ class MeshGPTTrainer:
                     transformerOptimizer.state_dict(),
                     transformer_dict_file + "_optimizer_end.pth",
                 )
+
+            if wandb_path:
+                wandb.finish()
 
             del transformerOptimizer
             torch.cuda.empty_cache()
@@ -421,5 +490,5 @@ class MeshGPTTrainer:
 
         # Generate a new mesh
         generated_codes = self.meshTransformer.generate(prompt, max_length)
-        gen_verts, gen_faces = self.autoEnc.decode_mesh(generated_codes)
-        return trimesh.Trimesh(gen_verts.cpu().numpy(), gen_faces.cpu().numpy())
+        gen_verts, gen_faces = self.autoEnc.decode_mesh(generated_codes.unsqueeze(0))
+        return trimesh.Trimesh(gen_verts[0].cpu().numpy(), gen_faces[0].cpu().numpy())

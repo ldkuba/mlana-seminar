@@ -485,6 +485,10 @@ class MeshGPTTrainer:
         self.meshTransformer.load_state_dict(torch.load(transformer_dict_file))
 
     def generate_mesh(self, prompt=None, max_length=0):
+
+        # Dont forget to set model to eval mode
+        self.meshTransformer.eval()
+
         if not prompt:
             prompt = torch.empty((0), device=device).long()
 

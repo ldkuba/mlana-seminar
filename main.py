@@ -35,7 +35,7 @@ if __name__ == "__main__":
 
     # === TRAIN AUTOENCODER ===
     
-    # If resuming training, first load the model
+    # If resuming training, first load the model. Remember to supply the optimizer dict file in the train function
     # meshgpt.load_autoencoder("./saved_models/autoencoder.pth")
 
     # meshgpt.train_autoencoder(
@@ -58,7 +58,7 @@ if __name__ == "__main__":
     # Load autoencoder
     # meshgpt.load_autoencoder("./saved_models/autoencoder.pth")
 
-    # If resuming training, first load the model
+    # If resuming training, first load the model. Remember to supply the optimizer dict file in the train function
     # meshgpt.load_mesh_transformer("./saved_models/mesh_transformer.pth")
 
     # Train mesh transformer
